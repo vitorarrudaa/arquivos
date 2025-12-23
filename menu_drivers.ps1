@@ -9,7 +9,7 @@ if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
 function Mostrar-MenuPrincipal {
     Clear-Host
     Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "     SUPORTE TECNICO - DRIVERS SAMSUNG    " -ForegroundColor Cyan
+    Write-Host "     SUPORTE TECH3 - DRIVERS SAMSUNG    " -ForegroundColor Cyan
     Write-Host "==========================================" -ForegroundColor Cyan
     Write-Host "1) Samsung ProXpress M4020"
     Write-Host "2) Samsung ProXpress M4070"
@@ -84,3 +84,4 @@ do {
         }
     }
 } while ($opcao -ne "q")
+
