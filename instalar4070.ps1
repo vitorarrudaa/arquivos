@@ -1,18 +1,18 @@
-# 1. Identifica automaticamente a pasta onde o script está sendo executado
+# 1. Identifica automaticamente a pasta onde o script esta sendo executado
 $caminhoBase = $PSScriptRoot
 
-# Definição dos nomes dos arquivos (Devem estar na mesma pasta do script)
+# Definicao dos nomes dos arquivos (Devem estar na mesma pasta do script)
 $driverImp     = Join-Path $caminhoBase "Driver_M4070_Print.exe"
 $driverScan    = Join-Path $caminhoBase "Driver_M4070_Scan.exe"
 $easyCreator   = Join-Path $caminhoBase "EasyDocumentCreator.exe"
 $easyManager   = Join-Path $caminhoBase "EasyPrinterManager.exe"
 
-# 2. Solicita os dados ao usuário
+# 2. Solicita os dados ao usuario
 $novoNome  = Read-Host "Digite o NOME desejado para a impressora"
-$printerIP = Read-Host "Digite o endereço IP da impressora"
+$printerIP = Read-Host "Digite o endereco IP da impressora"
 
-Write-Host "`n[1/6] Instalando Driver de Impressão..." -ForegroundColor Cyan
-# Executa o instalador que está na mesma pasta
+Write-Host "`n[1/6] Instalando Driver de Impressao..." -ForegroundColor Cyan
+# Executa o instalador que esta na mesma pasta
 Start-Process -FilePath $driverImp -ArgumentList "/S" -Wait
 Start-Sleep -Seconds 3
 
@@ -28,8 +28,8 @@ if ($impressoraPadrao) {
     Rename-Printer -Name $impressoraPadrao.Name -NewName $novoNome
 }
 
-# --- INSTALAÇÃO DOS DEMAIS COMPONENTES (MESMA PASTA) ---
-Write-Host "[3/6] Instalando Driver de Digitalização..." -ForegroundColor Cyan
+# --- INSTALACAO DOS DEMAIS COMPONENTES (MESMA PASTA) ---
+Write-Host "[3/6] Instalando Driver de Digitalizacao..." -ForegroundColor Cyan
 Start-Process -FilePath $driverScan -ArgumentList "/S" -Wait
 
 Write-Host "[4/6] Instalando Easy Document Creator..." -ForegroundColor Cyan
@@ -43,7 +43,7 @@ Write-Host "[6/6] Verificando duplicatas..." -ForegroundColor Yellow
 Get-Printer | Where-Object {$_.Name -like "*Samsung M337x 387x 407x* (Copiar*"} | Remove-Printer
 
 Write-Host "`n=================================================" -ForegroundColor White
-Write-Host "  INSTALAÇÃO CONCLUÍDA COM SUCESSO!" -ForegroundColor Green
+Write-Host "  INSTALACAO CONCLUIDA COM SUCESSO!" -ForegroundColor Green
 Write-Host "  Local dos drivers: $caminhoBase"
 Write-Host "  Impressora: $novoNome | IP: $printerIP"
 Write-Host "=================================================" -ForegroundColor White
