@@ -2,10 +2,10 @@
 $caminhoBase = $PSScriptRoot
 
 # Definição dos nomes dos arquivos (Devem estar na mesma pasta do script)
-$driverImp     = Join-Path $caminhoBase "Driver_Impressao.exe"
-$driverScan    = Join-Path $caminhoBase "Driver_Digitalizacao.exe"
-$easyCreator   = Join-Path $caminhoBase "Easy_Document_Creator.exe"
-$easyManager   = Join-Path $caminhoBase "Easy_Printer_Manager.exe"
+$driverImp     = Join-Path $caminhoBase "Driver_M4070_Print.exe"
+$driverScan    = Join-Path $caminhoBase "Driver_M4070_Scan.exe"
+$easyCreator   = Join-Path $caminhoBase "EasyDocumentCreator.exe"
+$easyManager   = Join-Path $caminhoBase "EasyPrinterManager.exe"
 
 # 2. Solicita os dados ao usuário
 $novoNome  = Read-Host "Digite o NOME desejado para a impressora"
