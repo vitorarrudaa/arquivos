@@ -2,3 +2,5 @@ ID,Modelo,FiltroDriver,UrlPrint,TemScan,UrlScan
 1,Samsung M4020,Samsung M332x 382x 402x Series,https://ftp.hp.com/pub/softlib/software13/printers/SS/SL-M3310ND/M332x_382x_402x_Series_WIN_SPL_PCL_V3.13.13.00.01_CDV1.39.exe,N,
 2,Samsung M4070,Samsung M337x 387x 407x Series,https://ftp.hp.com/pub/softlib/software13/printers/SS/SL-M3370FD/M337x_387x_407x_Series_WIN_SPL_PCL_V3.13.13.00.01_CDV1.38.exe,S,https://ftp.hp.com/pub/softlib/software13/printers/SS/SL-M3370FD/M337x_387x_407x_Series_WIN_Scanner_V3.31.39.11_CDV1.38.exe
 3,Samsung M4080,Samsung M408x Series,https://ftp.hp.com/pub/softlib/software13/printers/SS/SL-M4080FX/M408x_Series_WIN_UPD_V3.00.16.00.01_CDV1.08.exe,S,https://ftp.hp.com/pub/softlib/software13/printers/SS/SL-M4080FX/M408x_Series_WIN_Scanner_V3.32.12.20_CDV1.08.exe
+4,Samsung CLP 680,Samsung CLP-680 Series,https://ftp.hp.com/pub/softlib/software13/printers/SS/CLP-680DW/CLP-680_Series_WIN_SPL_PCL_V3.13.06.00.33_CDV1.24.exe,N,
+
