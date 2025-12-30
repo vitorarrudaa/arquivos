@@ -1,7 +1,7 @@
 # ================================================================================
 # SCRIPT: Motor de Instalacao Universal - Impressoras Samsung
-# VERSAO: 2.0 (Otimizado)
-# DESCRICAO: Instalador universal para drivers Samsung M4020/M4070/M4080
+# VERSAO: 2.1 (Atualizado)
+# DESCRICAO: Instalador universal para drivers Samsung
 # ================================================================================
 
 param (
@@ -90,34 +90,37 @@ function Get-ArquivoLocal {
 }
 
 function Remove-FilaDuplicada {
-    param([string]$nomeConfigurado)
+    param(
+        [string]$nomeConfigurado,
+        [string]$filtroDriver
+    )
     
     Write-Host "  -> Verificando filas duplicadas..." -ForegroundColor Gray
     
-    # Lista exata de nomes que o instalador cria (padrao de fabrica)
-    $nomesPadraoInstalador = @(
-        "Samsung M332x 382x 402x Series",
-        "Samsung M337x 387x 407x Series",
-        "Samsung M408x Series",
-        "Samsung Universal Print Driver",
-        "Samsung Universal Print Driver 2",
-        "Samsung Universal Print Driver 3"
-    )
-    
     $todasImpressoras = Get-Printer -ErrorAction SilentlyContinue
     
-    # Remover apenas filas com nomes padrao do instalador OU com "(Copy X)"
+    # Remover filas que atendam QUALQUER uma destas condicoes:
+    # 1. Nome EXATO do filtroDriver (ex: "Samsung CLP-680 Series")
+    # 2. Nome do filtroDriver com variacao (ex: "Samsung CLP-680 Series (Copia 1)")
+    # 3. Tem o mesmo driver mas nome diferente do configurado
+    # 4. Drivers Universal Samsung que sobraram
     $duplicatas = $todasImpressoras | Where-Object {
         $_.Name -ne $nomeConfigurado -and
         (
-            $nomesPadraoInstalador -contains $_.Name -or
-            $_.Name -match '^(Samsung .+) \(Copy \d+\)$'
+            # Nome exato do FiltroDriver
+            $_.Name -eq $filtroDriver -or
+            # FiltroDriver com variacoes (Copia 1, Copia 2, etc)
+            $_.Name -match "^$([regex]::Escape($filtroDriver))( \((C[oó]pia|Copy) \d+\))?$" -or
+            # Mesmo driver, nome diferente
+            ($_.DriverName -like "*$filtroDriver*" -and $_.Name -ne $nomeConfigurado) -or
+            # Drivers Universal sobrando
+            ($_.Name -like "*Samsung Universal Print Driver*" -and $_.DriverName -like "*Samsung Universal*")
         ) -and
         $_.Name -notlike "*Fax*"
     }
     
     if ($duplicatas) {
-        Write-Host "  -> Removendo filas duplicadas do instalador:" -ForegroundColor Yellow
+        Write-Host "  -> Removendo filas duplicadas:" -ForegroundColor Yellow
         foreach ($fila in $duplicatas) {
             try {
                 Remove-Printer -Name $fila.Name -Confirm:$false -ErrorAction Stop
@@ -188,11 +191,22 @@ if ($instalarPrint) {
         Write-Host "  -> Configurando fila de impressao..." -ForegroundColor Gray
         
         # Buscar fila criada pelo instalador
+        # PRIORIDADE: Driver nativo (sem PCL/PS) > PCL > PS > Universal
         $filaEspecifica = Get-Printer -ErrorAction SilentlyContinue | 
                          Where-Object {
-                             $_.Name -like "*$filtroDriverWindows*" -or 
-                             $_.DriverName -like "*$filtroDriverWindows*"
+                             ($_.Name -like "*$filtroDriverWindows*" -or $_.DriverName -like "*$filtroDriverWindows*") -and
+                             $_.DriverName -notlike "*PCL*" -and 
+                             $_.DriverName -notlike "* PS"
                          } | Select-Object -First 1
+        
+        # Se nao encontrou driver nativo, buscar qualquer um com o filtro
+        if (-not $filaEspecifica) {
+            $filaEspecifica = Get-Printer -ErrorAction SilentlyContinue | 
+                             Where-Object {
+                                 $_.Name -like "*$filtroDriverWindows*" -or 
+                                 $_.DriverName -like "*$filtroDriverWindows*"
+                             } | Select-Object -First 1
+        }
         
         $filaUniversal = $null
         if (-not $filaEspecifica) {
@@ -206,8 +220,31 @@ if ($instalarPrint) {
         # Configurar impressora
         try {
             if ($filaEspecifica) {
-                # Caso M4020/M4070: Fila especifica ja criada
-                Set-Printer -Name $filaEspecifica.Name -PortName $enderecoIP -ErrorAction Stop
+                # Verificar se o driver atual e PCL/PS e tentar trocar para nativo
+                if ($filaEspecifica.DriverName -like "*PCL*" -or $filaEspecifica.DriverName -like "* PS") {
+                    Write-Host "  -> Detectado driver PCL/PS. Buscando driver nativo..." -ForegroundColor Yellow
+                    
+                    # Buscar o driver nativo (sem PCL/PS no nome)
+                    $driverNativo = Get-PrinterDriver -ErrorAction SilentlyContinue | 
+                                   Where-Object { 
+                                       $_.Name -like "*$filtroDriverWindows*" -and 
+                                       $_.Name -notlike "*PCL*" -and 
+                                       $_.Name -notlike "* PS"
+                                   } | Select-Object -First 1
+                    
+                    if ($driverNativo) {
+                        Set-Printer -Name $filaEspecifica.Name -DriverName $driverNativo.Name -PortName $enderecoIP -ErrorAction Stop
+                        Write-Host "  -> Trocado para driver nativo: $($driverNativo.Name)" -ForegroundColor Green
+                    } else {
+                        # Se nao encontrar driver nativo, manter o atual
+                        Set-Printer -Name $filaEspecifica.Name -PortName $enderecoIP -ErrorAction Stop
+                        Write-Host "  [AVISO] Driver nativo nao encontrado. Mantendo: $($filaEspecifica.DriverName)" -ForegroundColor Yellow
+                    }
+                } else {
+                    # Driver ja e nativo, apenas configurar IP
+                    Set-Printer -Name $filaEspecifica.Name -PortName $enderecoIP -ErrorAction Stop
+                }
+                
                 Rename-Printer -Name $filaEspecifica.Name -NewName $nomeImpressora -ErrorAction Stop
                 Write-Host "  [OK] Impressora configurada com sucesso!" -ForegroundColor Green
             }
@@ -245,9 +282,9 @@ if ($instalarPrint) {
             Read-Host "`n  Pressione ENTER para continuar"
         }
         
-        # Limpar duplicatas
+        # Limpar duplicatas (AGORA PASSA O FILTRO DO DRIVER)
         Start-Sleep -Seconds 2
-        Remove-FilaDuplicada -nomeConfigurado $nomeImpressora
+        Remove-FilaDuplicada -nomeConfigurado $nomeImpressora -filtroDriver $filtroDriverWindows
         
         $etapaAtual++
         Write-Host ""
