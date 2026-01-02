@@ -109,7 +109,7 @@ function Remove-FilaDuplicada {
             # Nome exato do FiltroDriver
             $_.Name -eq $filtroDriver -or
             # FiltroDriver com variacoes (Copia 1, Copia 2, etc)
-            $_.Name -match "^$([regex]::Escape($filtroDriver))( \((C[oó]pia|Copy) \d+\))?$" -or
+            $_.Name -match "^$([regex]::Escape($filtroDriver))( PS| PCL[0-9].*)?( \((C[oó]pia|Copy) \d+\))?$" -or
             # Drivers Universal sobrando
             ($_.Name -like "*Samsung Universal Print Driver*" -and $_.DriverName -like "*Samsung Universal*")
         ) -and
@@ -430,4 +430,5 @@ Write-Host "========================================================" -Foregroun
 Write-Host ""
 
 Start-Sleep -Seconds 3
+
 
