@@ -170,7 +170,7 @@ if ($instalarPrint) {
         $opcao = Read-Host "`n  Escolha"
         
         if ($opcao -eq "1") {
-            $nomeImpressora = Read-Host "`n  -> Novo nome da impressora:"
+            $nomeImpressora = Read-Host "`n  -> Novo nome da impressora"
         } else {
             Write-Host "`n  [INFO] Instalacao cancelada pelo usuario`n" -ForegroundColor Cyan
             $etapaAtual++
@@ -452,6 +452,7 @@ Write-Host "========================================================" -Foregroun
 Write-Host ""
 
 Start-Sleep -Seconds 3
+
 
 
 
