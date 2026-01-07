@@ -305,20 +305,6 @@ $enderecoIP = Read-Host "  -> Endereco IP"
         Start-Sleep -Seconds 2
         Remove-FilaDuplicada -nomeConfigurado $nomeImpressora -filtroDriver $filtroDriverWindows
 
-        Write-Host ""
-        $imprimirTeste = Read-Host "  Deseja imprimir uma pagina de teste? (S/N)"
-        
-        if ($imprimirTeste -eq "S" -or $imprimirTeste -eq "s") {
-            Write-Host "  -> Enviando pagina de teste para impressao..." -ForegroundColor Gray
-            try {
-                Start-Process -FilePath "rundll32.exe" -ArgumentList "printui.dll,PrintUIEntry /k /n `"$nomeImpressora`"" -NoNewWindow -Wait
-                Write-Host "  [OK] Pagina de teste enviada!" -ForegroundColor Green
-            } catch {
-                Write-Host "  [AVISO] Nao foi possivel enviar automaticamente." -ForegroundColor Yellow
-                Write-Host "  -> Imprima manualmente em: Painel de Controle > Impressoras" -ForegroundColor Gray
-            }
-        }
-        
         $etapaAtual++
         Write-Host ""
     }
@@ -465,7 +451,31 @@ Write-Host "  PROCESSO CONCLUIDO COM SUCESSO!" -ForegroundColor Green
 Write-Host "========================================================" -ForegroundColor Green
 Write-Host ""
 
+# Perguntar sobre teste (só se instalou driver de impressão)
+if ($instalarPrint) {
+    # Verificar se impressora realmente existe
+    $impressoraInstalada = Get-Printer -Name $nomeImpressora -ErrorAction SilentlyContinue
+    
+    if ($impressoraInstalada) {
+        $imprimirTeste = Read-Host "  Deseja imprimir uma pagina de teste? (S/N)"
+        
+        if ($imprimirTeste -eq "S" -or $imprimirTeste -eq "s") {
+            Write-Host "  -> Enviando pagina de teste..." -ForegroundColor Gray
+            try {
+                Start-Process -FilePath "rundll32.exe" `
+                             -ArgumentList "printui.dll,PrintUIEntry /k /n `"$nomeImpressora`"" `
+                             -NoNewWindow -Wait
+                Write-Host "  [OK] Pagina de teste enviada!" -ForegroundColor Green
+            } catch {
+                Write-Host "  [AVISO] Falha ao enviar. Imprima manualmente." -ForegroundColor Yellow
+            }
+        }
+        Write-Host ""
+    }
+}
+
 Start-Sleep -Seconds 3
+
 
 
 
