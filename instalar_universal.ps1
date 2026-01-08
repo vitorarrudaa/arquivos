@@ -1,6 +1,6 @@
 # ================================================================================
 # SCRIPT: Motor de Instalacao Universal - Impressoras Samsung
-# VERSAO: 3.0 (Refatorado)
+# VERSAO: 3.1 (Interface Otimizada)
 # DESCRICAO: Instalador modular para drivers Samsung SPL e UPD
 # ================================================================================
 
@@ -93,12 +93,12 @@ function Get-ArquivoLocal {
     $caminhoCompleto = Join-Path $Global:Config.CaminhoTemp $nomeDestino
     
     if (Test-Path $caminhoCompleto) {
-        Write-Mensagem "Arquivo ja existe localmente. Reutilizando..." "Info"
+        Write-Mensagem "Reutilizando arquivo local: $nomeDestino" "Info"
         return $caminhoCompleto
     }
     
     try {
-        Write-Mensagem "Baixando: $nomeDestino..." "Info"
+        Write-Host "Baixando: $nomeDestino..." -ForegroundColor Gray
         Invoke-WebRequest -Uri $url -OutFile $caminhoCompleto -ErrorAction Stop -UseBasicParsing
         Write-Mensagem "Download concluido!" "Sucesso"
         return $caminhoCompleto
@@ -116,22 +116,17 @@ function New-PortaIP {
     if (-not (Get-PrinterPort $enderecoIP -ErrorAction SilentlyContinue)) {
         try {
             Add-PrinterPort -Name $enderecoIP -PrinterHostAddress $enderecoIP -ErrorAction Stop
-            Write-Mensagem "Porta IP criada: $enderecoIP" "Info"
             return $true
         } catch {
             Write-Mensagem "Falha ao criar porta IP: $($_.Exception.Message)" "Erro"
             return $false
         }
-    } else {
-        Write-Mensagem "Porta IP $enderecoIP ja existe" "Info"
-        return $true
     }
+    return $true
 }
 
 function Test-RedeImpressora {
     param([Parameter(Mandatory=$true)][string]$enderecoIP)
-    
-    Write-Mensagem "Verificando conectividade com a impressora..." "Info"
     
     # Obter IP do computador
     $meuIP = (Get-NetIPAddress -AddressFamily IPv4 | 
@@ -139,45 +134,44 @@ function Test-RedeImpressora {
               Select-Object -First 1).IPAddress
     
     if (-not $meuIP) {
-        Write-Mensagem "Nao foi possivel detectar IP do computador" "Aviso"
-        return $true  # Continua mesmo assim
+        return $true  # Continua se nao conseguir detectar IP
     }
     
-    # Comparar subnet (primeiros 3 octetos)
+    # Comparar subnet
     $minhaRede = ($meuIP -split '\.')[0..2] -join '.'
     $redeImpressora = ($enderecoIP -split '\.')[0..2] -join '.'
     
     if ($minhaRede -ne $redeImpressora) {
+        Write-Host ""
         Write-Mensagem "IP em rede diferente detectado!" "Aviso"
         Write-Host "  Seu computador: $meuIP"
         Write-Host "  IP digitado: $enderecoIP"
         
-        $continuar = Read-OpcaoValidada "`nContinuar mesmo assim?" @("S","s","N","n")
+        $continuar = Read-OpcaoValidada "`nContinuar mesmo assim? [S/N]" @("S","s","N","n")
+        Write-Host ""
         return ($continuar -eq "S" -or $continuar -eq "s")
     }
     
-    # Teste de ping (mesma rede)
-    Write-Mensagem "Testando ping..." "Info"
+    # Teste de ping
     $pingOk = Test-Connection -ComputerName $enderecoIP -Count 1 -Quiet -ErrorAction SilentlyContinue
     
     if (-not $pingOk) {
+        Write-Host ""
         Write-Mensagem "Impressora nao responde ao ping!" "Aviso"
         Write-Host "  Verifique se esta ligada e conectada a rede"
         
-        $continuar = Read-OpcaoValidada "`nContinuar mesmo assim?" @("S","s","N","n")
+        $continuar = Read-OpcaoValidada "`nContinuar mesmo assim? [S/N]" @("S","s","N","n")
+        Write-Host ""
         return ($continuar -eq "S" -or $continuar -eq "s")
     }
     
-    Write-Mensagem "Impressora responde ao ping!" "Sucesso"
     return $true
 }
 
 function Test-DriverExistente {
     param([Parameter(Mandatory=$true)][string]$filtroDriver)
     
-    Write-Mensagem "Verificando drivers instalados..." "Info"
-    
-    # Buscar driver nativo (sem PCL/PS)
+    # Busca silenciosa em background
     $driverNativo = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object { 
         $_.Name -like "*$filtroDriver*" -and
         $_.Name -notlike "*PCL*" -and
@@ -185,21 +179,18 @@ function Test-DriverExistente {
     } | Select-Object -First 1
     
     if ($driverNativo) {
-        Write-Mensagem "Driver nativo '$($driverNativo.Name)' ja instalado!" "Sucesso"
         return @{ Encontrado = $true; Driver = $driverNativo.Name; Tipo = "Nativo" }
     }
     
-    # Verificar se existe PCL/PS
+    # Verificar variacao
     $driverVariacao = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object { 
         $_.Name -like "*$filtroDriver*"
     } | Select-Object -First 1
     
     if ($driverVariacao) {
-        Write-Mensagem "Encontrado '$($driverVariacao.Name)' (nao e nativo)" "Aviso"
         return @{ Encontrado = $true; Driver = $driverVariacao.Name; Tipo = "Variacao" }
     }
     
-    Write-Mensagem "Driver nao encontrado no sistema" "Info"
     return @{ Encontrado = $false; Driver = $null; Tipo = $null }
 }
 
@@ -212,18 +203,20 @@ function Install-DriverSPL {
         [string]$enderecoIP
     )
     
-    # Verificar se driver nativo ja existe
+    # Verificacao silenciosa de driver existente
     $statusDriver = Test-DriverExistente -filtroDriver $filtroDriver
     
     if ($statusDriver.Encontrado -and $statusDriver.Tipo -eq "Nativo") {
-        # Driver nativo existe - usar direto
-        Write-Mensagem "Pulando instalacao (usando driver existente)" "Info"
+        # Driver nativo existe - informar e usar
+        Write-Host ""
+        Write-Mensagem "Driver '$($statusDriver.Driver)' ja presente no sistema" "Sucesso"
+        Write-Host "Configurando impressora..." -ForegroundColor Gray
         
         New-PortaIP -enderecoIP $enderecoIP | Out-Null
         
         try {
             Add-Printer -Name $nomeImpressora -DriverName $statusDriver.Driver -PortName $enderecoIP -ErrorAction Stop
-            Write-Mensagem "Impressora configurada com driver existente!" "Sucesso"
+            Write-Mensagem "Impressora configurada com sucesso!" "Sucesso"
             return $true
         } catch {
             Write-Mensagem "Falha ao criar impressora: $($_.Exception.Message)" "Erro"
@@ -231,28 +224,22 @@ function Install-DriverSPL {
         }
     }
     
-    # Precisa instalar driver (nao existe ou so tem variacao PCL/PS)
-    if ($statusDriver.Tipo -eq "Variacao") {
-        Write-Mensagem "Instalando versao nativa preferencial..." "Info"
-    } else {
-        Write-Mensagem "Instalando driver..." "Info"
-    }
-    
+    # Driver nao existe ou so tem variacao - instalar normalmente
+    Write-Host ""
     $nomeArquivo = "driver_print_" + ($nomeModelo -replace '\s+', '_') + ".exe"
     $arquivoDriver = Get-ArquivoLocal -url $urlDriver -nomeDestino $nomeArquivo
     
     if (-not $arquivoDriver) { return $false }
     
-    Write-Mensagem "Executando instalador (aguarde)..." "Info"
+    Write-Host "Instalando driver (aguarde)..." -ForegroundColor Gray
     Start-Process $arquivoDriver -ArgumentList "/S" -Wait -NoNewWindow
     Start-Sleep -Seconds $Global:Config.TempoEspera
     
     New-PortaIP -enderecoIP $enderecoIP | Out-Null
     
-    # Detectar e configurar fila criada pelo instalador
-    Write-Mensagem "Configurando fila de impressao..." "Info"
+    Write-Host "Configurando fila de impressao..." -ForegroundColor Gray
     
-    # Buscar fila nativa primeiro
+    # Detectar fila criada
     $filaEspecifica = Get-Printer -ErrorAction SilentlyContinue | 
                      Where-Object {
                          ($_.Name -like "*$filtroDriver*" -or $_.DriverName -like "*$filtroDriver*") -and
@@ -270,7 +257,7 @@ function Install-DriverSPL {
     
     try {
         if ($filaEspecifica) {
-            # Trocar para nativo se for PCL/PS
+            # Trocar para nativo se PCL/PS
             if ($filaEspecifica.DriverName -like "*PCL*" -or $filaEspecifica.DriverName -like "* PS") {
                 $driverNativo = Get-PrinterDriver -ErrorAction SilentlyContinue | 
                                Where-Object { 
@@ -283,7 +270,6 @@ function Install-DriverSPL {
                     Set-Printer -Name $filaEspecifica.Name -DriverName $driverNativo.Name -PortName $enderecoIP -ErrorAction Stop
                 } else {
                     Set-Printer -Name $filaEspecifica.Name -PortName $enderecoIP -ErrorAction Stop
-                    Write-Mensagem "Driver nativo nao disponivel (mantendo $($filaEspecifica.DriverName))" "Aviso"
                 }
             } else {
                 Set-Printer -Name $filaEspecifica.Name -PortName $enderecoIP -ErrorAction Stop
@@ -293,14 +279,13 @@ function Install-DriverSPL {
             Write-Mensagem "Impressora configurada com sucesso!" "Sucesso"
             return $true
         } else {
-            # Criar manualmente
             Add-Printer -Name $nomeImpressora -DriverName $filtroDriver -PortName $enderecoIP -ErrorAction Stop
-            Write-Mensagem "Fila criada manualmente!" "Sucesso"
+            Write-Mensagem "Impressora configurada com sucesso!" "Sucesso"
             return $true
         }
     }
     catch {
-        Write-Mensagem "Falha ao configurar: $($_.Exception.Message)" "Erro"
+        Write-Mensagem "Falha ao configurar impressora: $($_.Exception.Message)" "Erro"
         
         Write-Host "`nDrivers Samsung disponiveis:"
         Get-PrinterDriver -ErrorAction SilentlyContinue | 
@@ -321,12 +306,7 @@ function Install-DriverUPD {
         [string]$enderecoIP
     )
     
-    Write-Mensagem "Instalando driver UPD (Universal Print Driver)..." "Info"
-    
     # TODO: Implementar logica especifica para UPD
-    # Por enquanto usa mesma logica que SPL
-    # Precisa testar comportamento real da M4080/CLX-6260
-    
     return Install-DriverSPL -urlDriver $urlDriver `
                             -nomeModelo $nomeModelo `
                             -filtroDriver $filtroDriver `
@@ -336,8 +316,6 @@ function Install-DriverUPD {
 
 function Remove-FilaDuplicada {
     param([string]$nomeConfigurado, [string]$filtroDriver)
-    
-    Write-Mensagem "Verificando filas duplicadas..." "Info"
     
     $todasImpressoras = Get-Printer -ErrorAction SilentlyContinue
     
@@ -352,17 +330,12 @@ function Remove-FilaDuplicada {
     }
     
     if ($duplicatas) {
+        Write-Host "Removendo filas duplicadas..." -ForegroundColor Gray
         foreach ($fila in $duplicatas) {
             try {
                 Remove-Printer -Name $fila.Name -Confirm:$false -ErrorAction Stop
-                Write-Mensagem "Removida: $($fila.Name)" "Info"
-            }
-            catch {
-                Write-Mensagem "Falha ao remover: $($fila.Name)" "Erro"
-            }
+            } catch { }
         }
-    } else {
-        Write-Mensagem "Nenhuma duplicata encontrada" "Sucesso"
     }
 }
 
@@ -418,15 +391,19 @@ if ($instalarPrint) {
     
     # Coletar nome
     do {
-        $nomeImpressora = Read-Host "Nome da impressora"
+        $nomeImpressora = Read-Host "- Nome da impressora"
+        Write-Host ""
+        
         $impressoraExistente = Get-Printer -Name $nomeImpressora -ErrorAction SilentlyContinue
         
         if ($impressoraExistente) {
             Write-Mensagem "Ja existe impressora com nome '$nomeImpressora'" "Aviso"
             Write-Host "  IP atual: $($impressoraExistente.PortName)"
-            Write-Host "  Driver:   $($impressoraExistente.DriverName)"
+            Write-Host "  Driver:   $($impressoraExistente.DriverName)`n"
             
-            $opcao = Read-OpcaoValidada "`n[1] Digitar outro nome [2] Cancelar" @("1","2")
+            $opcao = Read-OpcaoValidada "[1] Digitar outro nome  [2] Cancelar" @("1","2")
+            Write-Host ""
+            
             if ($opcao -eq "2") {
                 Write-Mensagem "Instalacao cancelada" "Info"
                 return
@@ -436,10 +413,12 @@ if ($instalarPrint) {
     
     # Coletar e validar IP
     do {
-        $enderecoIP = Read-Host "Endereco IP"
+        $enderecoIP = Read-Host "- Endereco IP"
+        Write-Host ""
         
         if ($enderecoIP -notmatch '^\d{1,3}(\.\d{1,3}){3}$') {
             Write-Mensagem "IP invalido! Use formato XXX.XXX.XXX.XXX" "Erro"
+            Write-Host ""
             continue
         }
         
@@ -451,7 +430,7 @@ if ($instalarPrint) {
         break
     } while ($true)
     
-    # Instalar driver baseado no tipo
+    # Instalar driver
     $sucesso = if ($Global:TipoDriver -eq "UPD") {
         Install-DriverUPD -urlDriver $urlPrint `
                          -nomeModelo $modelo `
@@ -493,7 +472,7 @@ if ($instalarScan) {
         $arquivoScan = Get-ArquivoLocal -url $urlScan -nomeDestino $nomeArquivoScan
         
         if ($arquivoScan) {
-            Write-Mensagem "Instalando driver de scan..." "Info"
+            Write-Host "Instalando driver de scan..." -ForegroundColor Gray
             Start-Process $arquivoScan -ArgumentList "/S" -Wait -NoNewWindow
             Write-Mensagem "Driver de scan instalado!" "Sucesso"
         }
@@ -512,12 +491,12 @@ if ($instalarEPM) {
     Write-Host ""
     
     if (Test-ProgramaInstalado "Easy Printer Manager") {
-        Write-Mensagem "Ja instalado no sistema" "Info"
+        Write-Host "Ja instalado no sistema" -ForegroundColor Gray
     } else {
         $arquivoEPM = Get-ArquivoLocal -url $Global:Config.UrlEPM -nomeDestino "EPM_Universal.exe"
         
         if ($arquivoEPM) {
-            Write-Mensagem "Instalando (timeout: 60s)..." "Info"
+            Write-Host "Instalando (timeout: 60s)..." -ForegroundColor Gray
             
             $processo = Start-Process $arquivoEPM -ArgumentList "/S" -PassThru -NoNewWindow
             $tempoLimite = 60
@@ -555,12 +534,12 @@ if ($instalarEDC) {
     Write-Host ""
     
     if (Test-ProgramaInstalado "Easy Document Creator") {
-        Write-Mensagem "Ja instalado no sistema" "Info"
+        Write-Host "Ja instalado no sistema" -ForegroundColor Gray
     } else {
         $arquivoEDC = Get-ArquivoLocal -url $Global:Config.UrlEDC -nomeDestino "EDC_Universal.exe"
         
         if ($arquivoEDC) {
-            Write-Mensagem "Instalando (timeout: 60s)..." "Info"
+            Write-Host "Instalando (timeout: 60s)..." -ForegroundColor Gray
             
             $processo = Start-Process $arquivoEDC -ArgumentList "/S" -PassThru -NoNewWindow
             $tempoLimite = 60
@@ -600,7 +579,8 @@ if ($instalarPrint) {
                          -driver $driverInstalado `
                          -componentes $componentesInstalados
     
-    $imprimirTeste = Read-OpcaoValidada "Deseja imprimir uma pagina de teste?" @("S","s","N","n")
+    $imprimirTeste = Read-OpcaoValidada "Deseja imprimir uma pagina de teste? [S/N]" @("S","s","N","n")
+    Write-Host ""
     
     if ($imprimirTeste -eq "S" -or $imprimirTeste -eq "s") {
         try {
