@@ -306,12 +306,64 @@ function Install-DriverUPD {
         [string]$enderecoIP
     )
     
-    # TODO: Implementar logica especifica para UPD
-    return Install-DriverSPL -urlDriver $urlDriver `
-                            -nomeModelo $nomeModelo `
-                            -filtroDriver $filtroDriver `
-                            -nomeImpressora $nomeImpressora `
-                            -enderecoIP $enderecoIP
+    # 1. Verificacao silenciosa de driver específico já instalado
+    $statusDriver = Test-DriverExistente -filtroDriver $filtroDriver
+    
+    if ($statusDriver.Encontrado -and $statusDriver.Tipo -eq "Nativo") {
+        Write-Host ""
+        Write-Mensagem "Driver UPD Especifico '$($statusDriver.Driver)' detectado." "Sucesso"
+        Write-Host "Configurando impressora..." -ForegroundColor Gray
+        
+        New-PortaIP -enderecoIP $enderecoIP | Out-Null
+        
+        try {
+            Add-Printer -Name $nomeImpressora -DriverName $statusDriver.Driver -PortName $enderecoIP -ErrorAction Stop
+            Write-Mensagem "Impressora configurada com driver nativo!" "Sucesso"
+            return $true
+        } catch {
+            Write-Mensagem "Falha ao criar impressora com driver local: $($_.Exception.Message)" "Erro"
+            return $false
+        }
+    }
+
+    # 2. Driver nao existe - Instalação via executável UPD
+    Write-Host ""
+    $nomeArquivo = "driver_UPD_" + ($nomeModelo -replace '\s+', '_') + ".exe"
+    $arquivoDriver = Get-ArquivoLocal -url $urlDriver -nomeDestino $nomeArquivo
+    
+    if (-not $arquivoDriver) { return $false }
+    
+    Write-Host "Instalando pacote Universal Print Driver (aguarde)..." -ForegroundColor Gray
+    Start-Process $arquivoDriver -ArgumentList "/S" -Wait -NoNewWindow
+    Start-Sleep -Seconds $Global:Config.TempoEspera
+
+    New-PortaIP -enderecoIP $enderecoIP | Out-Null
+
+    # 3. Forçar a busca pelo driver específico extraído pelo instalador UPD
+    Write-Host "Refinando associacao: buscando '$filtroDriver'..." -ForegroundColor Gray
+    
+    $driverExtraido = Get-PrinterDriver | Where-Object { 
+        $_.Name -like "*$filtroDriver*" -and 
+        $_.Name -notlike "*PCL*" -and 
+        $_.Name -notlike "* PS" 
+    } | Select-Object -First 1
+
+    try {
+        if ($driverExtraido) {
+            # Cria a impressora já apontando para o driver específico (não o genérico)
+            Add-Printer -Name $nomeImpressora -DriverName $driverExtraido.Name -PortName $enderecoIP -ErrorAction Stop
+            Write-Mensagem "Impressora instalada com driver especifico UPD!" "Sucesso"
+        } else {
+            # Fallback: Se não achar o específico, tenta criar com o nome do filtro fornecido
+            Add-Printer -Name $nomeImpressora -DriverName $filtroDriver -PortName $enderecoIP -ErrorAction Stop
+            Write-Mensagem "Impressora configurada via filtro direto." "Sucesso"
+        }
+        return $true
+    }
+    catch {
+        Write-Mensagem "Erro ao associar driver UPD: $($_.Exception.Message)" "Erro"
+        return $false
+    }
 }
 
 function Remove-FilaDuplicada {
@@ -596,3 +648,4 @@ if ($instalarPrint) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
