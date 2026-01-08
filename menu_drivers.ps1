@@ -16,7 +16,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 # --- CONFIGURACAO DO REPOSITORIO GITHUB ---
 $Config = @{
-    Usuario     = "suportetech3brasil"
+    Usuario     = "vitorarrudaa"
     Repositorio = "arquivos"
     Branch      = "main"
 }
@@ -307,5 +307,6 @@ do {
     }
     
 } while ($true)
+
 
 
