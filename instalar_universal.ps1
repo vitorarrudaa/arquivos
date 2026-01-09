@@ -306,28 +306,19 @@ function Install-DriverUPD {
         [string]$enderecoIP
     )
     
-    Write-Host ""
-    Write-Mensagem "Iniciando instalacao UPD para: $nomeModelo" "Info"
+    # Verificar se driver específico já existe (usa função auxiliar existente)
+    $statusDriver = Test-DriverExistente -filtroDriver $filtroDriver
     
-    # PASSO 1: Verificar se o driver específico JÁ existe no sistema
-    Write-Host "Verificando drivers instalados..." -ForegroundColor Gray
-    
-    $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object { 
-        $_.Name -like "*$filtroDriver*" -and
-        $_.Name -notlike "*PCL*" -and
-        $_.Name -notlike "* PS" -and
-        $_.Name -notlike "*Universal Print Driver*"
-    } | Select-Object -First 1
-    
-    if ($driverEspecifico) {
-        Write-Mensagem "Driver específico '$($driverEspecifico.Name)' já instalado" "Sucesso"
-        Write-Host "Criando impressora com driver nativo..." -ForegroundColor Gray
+    if ($statusDriver.Encontrado -and $statusDriver.Tipo -eq "Nativo") {
+        Write-Host ""
+        Write-Mensagem "Driver '$($statusDriver.Driver)' já presente no sistema" "Sucesso"
+        Write-Host "Configurando impressora..." -ForegroundColor Gray
         
         New-PortaIP -enderecoIP $enderecoIP | Out-Null
         
         try {
-            Add-Printer -Name $nomeImpressora -DriverName $driverEspecifico.Name -PortName $enderecoIP -ErrorAction Stop
-            Write-Mensagem "Impressora configurada com driver específico!" "Sucesso"
+            Add-Printer -Name $nomeImpressora -DriverName $statusDriver.Driver -PortName $enderecoIP -ErrorAction Stop
+            Write-Mensagem "Impressora configurada com sucesso!" "Sucesso"
             return $true
         } catch {
             Write-Mensagem "Falha ao criar impressora: $($_.Exception.Message)" "Erro"
@@ -335,113 +326,108 @@ function Install-DriverUPD {
         }
     }
     
-    # PASSO 2: Driver não existe - fazer download e instalação
+    # Download do pacote (usa função auxiliar existente)
+    Write-Host ""
     $nomeArquivo = "driver_UPD_" + ($nomeModelo -replace '\s+', '_') + ".exe"
     $arquivoDriver = Get-ArquivoLocal -url $urlDriver -nomeDestino $nomeArquivo
     
     if (-not $arquivoDriver) { return $false }
     
-    Write-Host "Instalando pacote Universal Print Driver..." -ForegroundColor Gray
-    Write-Host "Isso pode demorar alguns segundos..." -ForegroundColor Gray
+    # Tentar extrair INF para instalação específica
+    $pastaExtracao = Join-Path $Global:Config.CaminhoTemp "UPD_Extract_Temp"
     
-    # Executar instalador silencioso
-    Start-Process $arquivoDriver -ArgumentList "/S" -Wait -NoNewWindow
+    if (Test-Path $pastaExtracao) {
+        Remove-Item $pastaExtracao -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -Path $pastaExtracao -ItemType Directory -Force | Out-Null
     
-    # Aguardar instalação completar
-    Start-Sleep -Seconds $Global:Config.TempoEspera
+    Write-Host "Tentando extrair driver específico..." -ForegroundColor Gray
     
-    # PASSO 3: FORÇAR detecção do driver específico instalado
-    Write-Host "Aguardando registro do driver específico no sistema..." -ForegroundColor Gray
+    # Tentativa de extração silenciosa
+    $processoExtracao = Start-Process $arquivoDriver -ArgumentList "/extract:$pastaExtracao" -PassThru -NoNewWindow -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 5
     
-    $tentativas = 0
-    $maxTentativas = 5
-    $driverEncontrado = $null
-    
-    while ($tentativas -lt $maxTentativas -and -not $driverEncontrado) {
-        Start-Sleep -Seconds 2
-        
-        # Buscar EXATAMENTE pelo filtro fornecido (ex: "Samsung M408x Series")
-        $driverEncontrado = Get-PrinterDriver -ErrorAction SilentlyContinue | Where-Object { 
-            $_.Name -eq $filtroDriver -or
-            ($_.Name -like "*$filtroDriver*" -and
-             $_.Name -notlike "*PCL*" -and
-             $_.Name -notlike "* PS" -and
-             $_.Name -notlike "*Universal Print Driver*")
-        } | Select-Object -First 1
-        
-        $tentativas++
-        
-        if (-not $driverEncontrado) {
-            Write-Host "Aguardando... (tentativa $tentativas/$maxTentativas)" -ForegroundColor Gray
-        }
+    if (-not $processoExtracao.HasExited) {
+        Stop-Process -Id $processoExtracao.Id -Force -ErrorAction SilentlyContinue
     }
     
-    # PASSO 4: Verificar resultado da busca
-    if (-not $driverEncontrado) {
-        Write-Mensagem "Driver específico não detectado após instalação" "Aviso"
-        Write-Host "`nDrivers Samsung disponíveis:" -ForegroundColor Yellow
-        
-        Get-PrinterDriver -ErrorAction SilentlyContinue | 
-            Where-Object { $_.Name -like "*Samsung*" } | 
-            ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor White }
-        
-        Write-Host ""
-        $continuarGenerico = Read-OpcaoValidada "Deseja criar com driver genérico Universal? [S/N]" @("S","s","N","n")
-        
-        if ($continuarGenerico -eq "N" -or $continuarGenerico -eq "n") {
-            Write-Mensagem "Instalação cancelada pelo usuário" "Info"
-            return $false
-        }
-        
-        # Usar Universal como fallback
-        $driverEncontrado = Get-PrinterDriver -ErrorAction SilentlyContinue | 
-                           Where-Object { $_.Name -like "*Samsung Universal Print Driver*" } | 
-                           Select-Object -First 1
-        
-        if (-not $driverEncontrado) {
-            Write-Mensagem "Nenhum driver Samsung disponível" "Erro"
-            return $false
-        }
+    # Procurar INF extraído
+    $arquivoInf = Get-ChildItem -Path $pastaExtracao -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue | 
+                 Where-Object { $_.Name -notlike "*autorun*" } | 
+                 Select-Object -First 1
+    
+    # Instalar driver
+    if ($arquivoInf) {
+        Write-Host "Instalando driver específico via INF..." -ForegroundColor Gray
+        & pnputil /add-driver "$($arquivoInf.FullName)" /install 2>&1 | Out-Null
+        Start-Sleep -Seconds 5
+    } else {
+        Write-Host "Instalando via método padrão..." -ForegroundColor Gray
+        Start-Process $arquivoDriver -ArgumentList "/S" -Wait -NoNewWindow
+        Start-Sleep -Seconds $Global:Config.TempoEspera
     }
     
-    # PASSO 5: Criar porta IP
-    Write-Host "Criando porta de rede..." -ForegroundColor Gray
+    # Limpar extração
+    Remove-Item $pastaExtracao -Recurse -Force -ErrorAction SilentlyContinue
+    
+    # Criar porta (usa função auxiliar)
     New-PortaIP -enderecoIP $enderecoIP | Out-Null
     
-    # PASSO 6: Criar impressora com o driver ESPECÍFICO encontrado
-    Write-Host "Configurando impressora com driver: $($driverEncontrado.Name)" -ForegroundColor Gray
+    Write-Host "Configurando fila de impressão..." -ForegroundColor Gray
+    
+    # Buscar driver específico instalado
+    $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue | 
+                       Where-Object { 
+                           $_.Name -like "*$filtroDriver*" -and
+                           $_.Name -notlike "*PCL*" -and 
+                           $_.Name -notlike "* PS" -and
+                           $_.Name -notlike "*Universal Print Driver*"
+                       } | Select-Object -First 1
+    
+    # Buscar fila genérica criada automaticamente
+    $filaGenerica = Get-Printer -ErrorAction SilentlyContinue | 
+                    Where-Object {
+                        $_.Name -like "*Samsung Universal Print Driver*" -or
+                        $_.DriverName -like "*Samsung Universal Print Driver*"
+                    } | Select-Object -First 1
     
     try {
-        Add-Printer -Name $nomeImpressora `
-                   -DriverName $driverEncontrado.Name `
-                   -PortName $enderecoIP `
-                   -ErrorAction Stop
-        
-        Write-Mensagem "Impressora instalada com sucesso!" "Sucesso"
-        Write-Host "Driver associado: $($driverEncontrado.Name)" -ForegroundColor Cyan
-        
-        # PASSO 7: Validação final - confirmar que não pegou o genérico
-        Start-Sleep -Seconds 2
-        $impressoraFinal = Get-Printer -Name $nomeImpressora -ErrorAction SilentlyContinue
-        
-        if ($impressoraFinal.DriverName -like "*Universal Print Driver*") {
-            Write-Mensagem "AVISO: Sistema ainda está usando driver genérico" "Aviso"
-            Write-Host "Tentando forçar troca para driver específico..." -ForegroundColor Yellow
-            
-            # Tentar forçar troca
-            try {
-                Set-Printer -Name $nomeImpressora -DriverName $filtroDriver -ErrorAction Stop
-                Write-Mensagem "Driver corrigido com sucesso!" "Sucesso"
-            } catch {
-                Write-Mensagem "Não foi possível forçar driver específico" "Aviso"
-                Write-Host "A impressora funcionará, mas com driver genérico" -ForegroundColor Yellow
-            }
+        if ($filaGenerica -and $driverEspecifico) {
+            # Cenário 1: Trocar driver da fila genérica e renomear
+            Set-Printer -Name $filaGenerica.Name -DriverName $driverEspecifico.Name -PortName $enderecoIP -ErrorAction Stop
+            Rename-Printer -Name $filaGenerica.Name -NewName $nomeImpressora -ErrorAction Stop
+            Write-Mensagem "Impressora configurada com driver específico!" "Sucesso"
+            return $true
         }
-        
-        return $true
+        elseif ($driverEspecifico) {
+            # Cenário 2: Criar nova impressora com driver específico
+            Add-Printer -Name $nomeImpressora -DriverName $driverEspecifico.Name -PortName $enderecoIP -ErrorAction Stop
+            Write-Mensagem "Impressora configurada com driver específico!" "Sucesso"
+            return $true
+        }
+        elseif ($filaGenerica) {
+            # Cenário 3: Renomear fila genérica (driver específico não encontrado)
+            Set-Printer -Name $filaGenerica.Name -PortName $enderecoIP -ErrorAction Stop
+            Rename-Printer -Name $filaGenerica.Name -NewName $nomeImpressora -ErrorAction Stop
+            Write-Mensagem "Impressora configurada (driver genérico)" "Aviso"
+            return $true
+        }
+        else {
+            # Cenário 4: Criar manualmente com filtro
+            Add-Printer -Name $nomeImpressora -DriverName $filtroDriver -PortName $enderecoIP -ErrorAction Stop
+            Write-Mensagem "Impressora configurada!" "Sucesso"
+            return $true
+        }
     }
     catch {
-        Write-Mensagem "Erro ao criar impressora: $($_.Exception.Message)" "Erro"
+        Write-Mensagem "Falha ao configurar impressora: $($_.Exception.Message)" "Erro"
+        
+        Write-Host "`nDrivers Samsung disponíveis:"
+        Get-PrinterDriver -ErrorAction SilentlyContinue | 
+            Where-Object { $_.Name -like "*Samsung*" } | 
+            ForEach-Object { Write-Host "  - $($_.Name)" }
+        
+        Read-Host "`nPressione ENTER para continuar"
         return $false
     }
 }
@@ -728,5 +714,6 @@ if ($instalarPrint) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
 
 
