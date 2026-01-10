@@ -396,41 +396,41 @@ function Install-DriverUPD {
             
             Start-Sleep -Seconds 3
             
-            # PASSO 2: Instanciar o driver de impressora no sistema
+            # PASSO 2: Registrar driver usando printui.dll (metodo nativo do Windows)
             Write-Host "Registrando driver de impressora..." -ForegroundColor Gray
             
-            try {
-                # Tentar adicionar com nome exato do filtro
-                Add-PrinterDriver -Name $filtroDriver -ErrorAction Stop
-                Write-Mensagem "Driver '$filtroDriver' registrado!" "Sucesso"
-            }
-            catch {
-                # Se falhar, tentar encontrar o nome correto no INF
-                Write-Host "Tentando detectar nome do driver no INF..." -ForegroundColor Gray
+            # Encontrar caminho completo do INF no DriverStore
+            $infNoDriverStore = Get-ChildItem "C:\Windows\System32\DriverStore\FileRepository\" -Recurse -Filter $infEspecifico.Name -ErrorAction SilentlyContinue | Select-Object -First 1
+            
+            if ($infNoDriverStore) {
+                Write-Host "INF localizado: $($infNoDriverStore.FullName)" -ForegroundColor Cyan
                 
-                $conteudoInf = Get-Content $infEspecifico.FullName -Raw -ErrorAction SilentlyContinue
+                # Usar printui.dll para instalar o driver (metodo que o Windows usa internamente)
+                $argumentos = "/ia /m `"$filtroDriver`" /f `"$($infNoDriverStore.FullName)`""
                 
-                # Procurar por linhas de modelo no INF
-                $modeloMatch = [regex]::Match($conteudoInf, '"([^"]*' + $filtroDriver.Replace(' ', '.*') + '[^"]*)"')
-                
-                if ($modeloMatch.Success) {
-                    $nomeDriver = $modeloMatch.Groups[1].Value
-                    Write-Host "Nome encontrado: $nomeDriver" -ForegroundColor Cyan
+                try {
+                    Start-Process "rundll32.exe" -ArgumentList "printui.dll,PrintUIEntry $argumentos" -Wait -NoNewWindow -ErrorAction Stop
+                    Write-Mensagem "Driver registrado via printui!" "Sucesso"
+                    Start-Sleep -Seconds 3
+                }
+                catch {
+                    Write-Mensagem "Falha com printui, tentando Add-PrinterDriver..." "Aviso"
                     
+                    # Fallback: tentar Add-PrinterDriver
                     try {
-                        Add-PrinterDriver -Name $nomeDriver -ErrorAction Stop
-                        Write-Mensagem "Driver registrado com nome alternativo!" "Sucesso"
+                        Add-PrinterDriver -Name $filtroDriver -InfPath $infNoDriverStore.FullName -ErrorAction Stop
+                        Write-Mensagem "Driver registrado!" "Sucesso"
                     }
                     catch {
-                        Write-Mensagem "Falha ao registrar driver: $($_.Exception.Message)" "Aviso"
+                        Write-Mensagem "Erro ao registrar driver: $($_.Exception.Message)" "Aviso"
                     }
                 }
-                else {
-                    Write-Mensagem "Nao foi possivel registrar driver automaticamente" "Aviso"
-                }
+            }
+            else {
+                Write-Mensagem "INF nao encontrado no DriverStore" "Aviso"
             }
             
-            Start-Sleep -Seconds 3
+            Start-Sleep -Seconds 2
         }
         catch {
             Write-Mensagem "Erro ao processar driver: $($_.Exception.Message)" "Erro"
@@ -792,6 +792,7 @@ if ($instalarPrint) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
 
 
 
