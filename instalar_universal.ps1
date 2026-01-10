@@ -190,30 +190,6 @@ function Test-DriverExistente {
     return @{ Encontrado = $false; Driver = $null; Tipo = $null }
 }
 
-    function Test-DriverScanExistente {
-        param([Parameter(Mandatory=$true)][string]$nomeModelo)
-        
-        # 1. Extrai apenas os 3 primeiros digitos numéricos (Ex: de "M4020" vira "402")
-        # Isso faz com que a busca encontre a série "407x"
-        if ($nomeModelo -match '(\d{3})\d?') { 
-            $baseNumerica = $Matches[1] 
-        } else {
-            $baseNumerica = $nomeModelo
-        }
-    
-        # 2. Busca no Registro de Desinstalação (onde o nome que você passou está gravado)
-        $registro = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", 
-                                     "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
-                    Where-Object { 
-                        $n = $_.DisplayName
-                        # Critério: Tem que ter Samsung + os 3 números base + Scan ou Series
-                        ($n -like "*Samsung*" -and $n -like "*$baseNumerica*" -and ($n -like "*Scan*" -or $n -like "*Series*"))
-                    }
-    
-        # 3. Retorno booleano para o seu IF no instalar_universal
-        return [bool]$registro
-}
-
 function Install-DriverSPL {
     param(
         [string]$urlDriver,
@@ -618,9 +594,6 @@ if ($instalarScan) {
     if ([string]::IsNullOrWhiteSpace($urlScan)) {
         Write-Mensagem "URL de scan nao disponivel" "Aviso"
     } else {
-        if (Test-DriverScanExistente -nomeModelo $modelo) {
-            Write-Mensagem "Driver de scan ja presente no sistema" "Sucesso"
-        } else {
             $nomeArquivoScan = "driver_scan_" + ($modelo -replace '\s+', '_') + ".exe"
             $arquivoScan = Get-ArquivoLocal -url $urlScan -nomeDestino $nomeArquivoScan
             
@@ -757,6 +730,7 @@ elseif ($instalarPrint -and -not $instalacaoSucesso) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
 
 
 
