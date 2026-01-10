@@ -1,6 +1,6 @@
 # ================================================================================
 # SCRIPT: Menu Principal - Sistema de Instalacao de Impressoras Samsung
-# VERSAO: 2.0 (Otimizado)
+# VERSAO: 2.1 (Otimizado e Corrigido)
 # DESCRICAO: Menu interativo para instalacao remota de drivers Samsung
 # ================================================================================
 
@@ -175,32 +175,26 @@ do {
     
     # Sair do sistema
     if ($escolhaModelo -eq "Q" -or $escolhaModelo -eq "q") {
-        Write-Host "`n[INFO] Limpando scripts temporarios..." -ForegroundColor Cyan
-    
-    # Sempre remove scripts
-    Remove-Item "$env:USERPROFILE\Downloads\Suporte_Tech3" -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Host "[OK] Scripts removidos!" -ForegroundColor Green
-    
-    # Pergunta sobre drivers COM VALIDAÇÃO
-    Write-Host ""
-    do {
-        $limparDrivers = Read-Host "Deseja apagar tambem os drivers baixados? (S/N)"
+        Write-Host ""
         
-        if ($limparDrivers -eq "S" -or $limparDrivers -eq "s") {
-            Remove-Item "$env:USERPROFILE\Downloads\Instalacao_Samsung" -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "[OK] Drivers removidos!" -ForegroundColor Green
-            break
-        }
-        elseif ($limparDrivers -eq "N" -or $limparDrivers -eq "n") {
-            Write-Host "[INFO] Drivers mantidos em: $env:USERPROFILE\Downloads\Instalacao_Samsung" -ForegroundColor Cyan
-            break
-        }
-        else {
-            Write-Host "[AVISO] Digite apenas S ou N" -ForegroundColor Yellow
-        }
-    } while ($true)
-    
-    Write-Host "`n[INFO] Encerrando sistema...`n" -ForegroundColor Cyan
+        do {
+            $limparDrivers = Read-Host "Deseja apagar os drivers baixados? (S/N)"
+            
+            if ($limparDrivers -eq "S" -or $limparDrivers -eq "s") {
+                Remove-Item "$env:USERPROFILE\Downloads\Suporte_Tech3" -Recurse -Force -ErrorAction SilentlyContinue
+                Remove-Item "$env:USERPROFILE\Downloads\Instalacao_Samsung" -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host "`n[OK] Todos os arquivos foram removidos!`n" -ForegroundColor Green
+                break
+            }
+            elseif ($limparDrivers -eq "N" -or $limparDrivers -eq "n") {
+                Remove-Item "$env:USERPROFILE\Downloads\Suporte_Tech3" -Recurse -Force -ErrorAction SilentlyContinue
+                break
+            }
+            else {
+                Write-Host "[AVISO] Digite apenas S ou N" -ForegroundColor Yellow
+            }
+        } while ($true)
+        
         break
     }
     
@@ -307,6 +301,3 @@ do {
     }
     
 } while ($true)
-
-
-
