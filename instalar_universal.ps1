@@ -1,6 +1,7 @@
+
 # ================================================================================
 # SCRIPT: Motor de Instalacao Universal - Impressoras Samsung
-# VERSAO: 3.2 (Corrigido - Resumo Condicional)
+# VERSAO: 3.3 (Corrigido - Validacoes e Formatacao)
 # DESCRICAO: Instalador modular para drivers Samsung SPL e UPD
 # ================================================================================
 
@@ -128,7 +129,6 @@ function New-PortaIP {
 function Test-RedeImpressora {
     param([Parameter(Mandatory=$true)][string]$enderecoIP)
     
-    # Obter IP do computador
     $meuIP = (Get-NetIPAddress -AddressFamily IPv4 | 
               Where-Object { $_.IPAddress -notlike "127.*" -and $_.PrefixOrigin -ne "WellKnown" } | 
               Select-Object -First 1).IPAddress
@@ -137,7 +137,6 @@ function Test-RedeImpressora {
         return $true
     }
     
-    # Comparar subnet
     $minhaRede = ($meuIP -split '\.')[0..2] -join '.'
     $redeImpressora = ($enderecoIP -split '\.')[0..2] -join '.'
     
@@ -152,7 +151,6 @@ function Test-RedeImpressora {
         return ($continuar -eq "S" -or $continuar -eq "s")
     }
     
-    # Teste de ping
     $pingOk = Test-Connection -ComputerName $enderecoIP -Count 1 -Quiet -ErrorAction SilentlyContinue
     
     if (-not $pingOk) {
@@ -190,6 +188,18 @@ function Test-DriverExistente {
     }
     
     return @{ Encontrado = $false; Driver = $null; Tipo = $null }
+}
+
+function Test-DriverScanExistente {
+    param([Parameter(Mandatory=$true)][string]$nomeModelo)
+    
+    $filtroScan = $nomeModelo -replace '\s+', '.*'
+    
+    $programas = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", 
+                                  "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayName -like "*$nomeModelo*" -and $_.DisplayName -like "*Scan*" }
+    
+    return [bool]$programas
 }
 
 function Install-DriverSPL {
@@ -340,13 +350,12 @@ function Install-DriverUPD {
         }
     }
     
-    
     $infEspecifico = Get-ChildItem -Path $pastaExtracao -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue | 
                      Where-Object { $_.Name -notlike "*autorun*" -and $_.Name -notlike "*setup*" } |
                      Select-Object -First 1
     
     if ($infEspecifico) {
-        
+        Write-Host "Instalando driver via pnputil..." -ForegroundColor Gray
         & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1 | Out-Null
         Start-Sleep -Seconds 3
         
@@ -530,6 +539,25 @@ if ($instalarPrint) {
             continue
         }
         
+        $impressoraMesmoIP = Get-Printer -ErrorAction SilentlyContinue | 
+                            Where-Object { $_.PortName -eq $enderecoIP } | 
+                            Select-Object -First 1
+        
+        if ($impressoraMesmoIP) {
+            Write-Mensagem "Uma impressora com esse mesmo IP foi detectada no sistema!" "Aviso"
+            Write-Host "  Nome:   $($impressoraMesmoIP.Name)"
+            Write-Host "  Driver: $($impressoraMesmoIP.DriverName)`n"
+            
+            $opcao = Read-OpcaoValidada "[1] Digitar outro IP  [2] Cancelar" @("1","2")
+            Write-Host ""
+            
+            if ($opcao -eq "2") {
+                Write-Mensagem "Instalacao cancelada" "Info"
+                return
+            }
+            continue
+        }
+        
         if (-not (Test-RedeImpressora -enderecoIP $enderecoIP)) {
             Write-Mensagem "Instalacao cancelada pelo usuario" "Info"
             return
@@ -581,13 +609,17 @@ if ($instalarScan) {
     if ([string]::IsNullOrWhiteSpace($urlScan)) {
         Write-Mensagem "URL de scan nao disponivel" "Aviso"
     } else {
-        $nomeArquivoScan = "driver_scan_" + ($modelo -replace '\s+', '_') + ".exe"
-        $arquivoScan = Get-ArquivoLocal -url $urlScan -nomeDestino $nomeArquivoScan
-        
-        if ($arquivoScan) {
-            Write-Host "Instalando driver de scan..." -ForegroundColor Gray
-            Start-Process $arquivoScan -ArgumentList "/S" -Wait -NoNewWindow
-            Write-Mensagem "Driver de scan instalado!" "Sucesso"
+        if (Test-DriverScanExistente -nomeModelo $modelo) {
+            Write-Mensagem "Driver de scan ja presente no sistema" "Sucesso"
+        } else {
+            $nomeArquivoScan = "driver_scan_" + ($modelo -replace '\s+', '_') + ".exe"
+            $arquivoScan = Get-ArquivoLocal -url $urlScan -nomeDestino $nomeArquivoScan
+            
+            if ($arquivoScan) {
+                Write-Host "Instalando driver de scan..." -ForegroundColor Gray
+                Start-Process $arquivoScan -ArgumentList "/S" -Wait -NoNewWindow
+                Write-Mensagem "Driver de scan instalado!" "Sucesso"
+            }
         }
     }
     
@@ -716,3 +748,4 @@ elseif ($instalarPrint -and -not $instalacaoSucesso) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
