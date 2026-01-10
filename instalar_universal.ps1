@@ -384,21 +384,56 @@ function Install-DriverUPD {
         Write-Host "Instalando driver via pnputil..." -ForegroundColor Gray
         
         try {
-            # Instalar driver via pnputil
+            # PASSO 1: Injetar INF no repositorio do Windows
             $resultado = & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1
             
-            # Verificar se instalou com sucesso
             if ($LASTEXITCODE -eq 0 -or $resultado -match "successfully|instalado") {
-                Write-Mensagem "Driver injetado com sucesso!" "Sucesso"
-                Start-Sleep -Seconds 5
+                Write-Mensagem "INF adicionado ao sistema!" "Sucesso"
             }
             else {
                 Write-Mensagem "pnputil retornou codigo $LASTEXITCODE" "Aviso"
-                Write-Host "Saida: $resultado" -ForegroundColor Gray
             }
+            
+            Start-Sleep -Seconds 3
+            
+            # PASSO 2: Instanciar o driver de impressora no sistema
+            Write-Host "Registrando driver de impressora..." -ForegroundColor Gray
+            
+            try {
+                # Tentar adicionar com nome exato do filtro
+                Add-PrinterDriver -Name $filtroDriver -ErrorAction Stop
+                Write-Mensagem "Driver '$filtroDriver' registrado!" "Sucesso"
+            }
+            catch {
+                # Se falhar, tentar encontrar o nome correto no INF
+                Write-Host "Tentando detectar nome do driver no INF..." -ForegroundColor Gray
+                
+                $conteudoInf = Get-Content $infEspecifico.FullName -Raw -ErrorAction SilentlyContinue
+                
+                # Procurar por linhas de modelo no INF
+                $modeloMatch = [regex]::Match($conteudoInf, '"([^"]*' + $filtroDriver.Replace(' ', '.*') + '[^"]*)"')
+                
+                if ($modeloMatch.Success) {
+                    $nomeDriver = $modeloMatch.Groups[1].Value
+                    Write-Host "Nome encontrado: $nomeDriver" -ForegroundColor Cyan
+                    
+                    try {
+                        Add-PrinterDriver -Name $nomeDriver -ErrorAction Stop
+                        Write-Mensagem "Driver registrado com nome alternativo!" "Sucesso"
+                    }
+                    catch {
+                        Write-Mensagem "Falha ao registrar driver: $($_.Exception.Message)" "Aviso"
+                    }
+                }
+                else {
+                    Write-Mensagem "Nao foi possivel registrar driver automaticamente" "Aviso"
+                }
+            }
+            
+            Start-Sleep -Seconds 3
         }
         catch {
-            Write-Mensagem "Erro ao executar pnputil: $($_.Exception.Message)" "Erro"
+            Write-Mensagem "Erro ao processar driver: $($_.Exception.Message)" "Erro"
         }
     }
     else {
@@ -757,6 +792,7 @@ if ($instalarPrint) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
 
 
 
