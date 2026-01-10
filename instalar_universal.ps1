@@ -306,172 +306,65 @@ function Install-DriverUPD {
         [string]$enderecoIP
     )
     
-    # Verificar se driver especifico ja existe
+    # 1. Verificação prévia (Se já existir, não faz nada)
     $statusDriver = Test-DriverExistente -filtroDriver $filtroDriver
-    
     if ($statusDriver.Encontrado -and $statusDriver.Tipo -eq "Nativo") {
-        Write-Host ""
-        Write-Mensagem "Driver '$($statusDriver.Driver)' ja presente no sistema" "Sucesso"
-        Write-Host "Configurando impressora..." -ForegroundColor Gray
-        
+        Write-Mensagem "Driver '$($statusDriver.Driver)' já detetado no sistema." "Sucesso"
         New-PortaIP -enderecoIP $enderecoIP | Out-Null
-        
-        try {
-            Add-Printer -Name $nomeImpressora -DriverName $statusDriver.Driver -PortName $enderecoIP -ErrorAction Stop
-            Write-Mensagem "Impressora configurada com sucesso!" "Sucesso"
-            return $true
-        } catch {
-            Write-Mensagem "Falha ao criar impressora: $($_.Exception.Message)" "Erro"
-            return $false
-        }
+        Add-Printer -Name $nomeImpressora -DriverName $statusDriver.Driver -PortName $enderecoIP
+        return $true
     }
-    
-    # Download do pacote
-    Write-Host ""
+
+    # 2. Download do ficheiro
     $nomeArquivo = "driver_UPD_" + ($nomeModelo -replace '\s+', '_') + ".exe"
     $arquivoDriver = Get-ArquivoLocal -url $urlDriver -nomeDestino $nomeArquivo
-    
     if (-not $arquivoDriver) { return $false }
-    
-    # Criar pasta para extracao
-    $pastaExtracao = Join-Path $Global:Config.CaminhoTemp ("UPD_Extract_" + [guid]::NewGuid().ToString().Substring(0,8))
-    New-Item -Path $pastaExtracao -ItemType Directory -Force | Out-Null
-    
-    Write-Host "Extraindo pacote de drivers..." -ForegroundColor Gray
-    
-    # Metodo 1: Tentar extrair com 7-Zip (se disponivel)
-    $7zipPath = "${env:ProgramFiles}\7-Zip\7z.exe"
-    if (Test-Path $7zipPath) {
-        & $7zipPath x "$arquivoDriver" "-o$pastaExtracao" -y | Out-Null
+
+    # 3. EXTRAÇÃO MANUAL DO INF (A lógica que funcionou anteriormente)
+    Write-Host "Extraindo pacotes de driver para $nomeModelo..." -ForegroundColor Gray
+    $pastaExtrair = Join-Path $Global:Config.CaminhoTemp "Extraido_$nomeModelo"
+    if (!(Test-Path $pastaExtrair)) { New-Item $pastaExtrair -ItemType Directory -Force | Out-Null }
+
+    # O comando /x extrai o conteúdo. O /s torna-o silencioso.
+    Start-Process $arquivoDriver -ArgumentList "/x`"$pastaExtrair`" /s" -Wait -NoNewWindow
+
+    # 4. LOCALIZAR E INJETAR O INF NO WINDOWS
+    Write-Host "Procurando ficheiro .inf específico (ignoring PCL/PS)..." -ForegroundColor Gray
+    $infFile = Get-ChildItem -Path $pastaExtrair -Filter "*.inf" -Recurse | 
+               Where-Object { $_.FullName -match "m408" -and $_.FullName -notmatch "pcl|ps" } | 
+               Select-Object -First 1
+
+    if ($infFile) {
+        Write-Mensagem "Injetando driver via PNPUtil: $($infFile.Name)" "Info"
+        # Força o registo do driver no DriverStore do Windows
+        pnputil /add-driver $infFile.FullName /install | Out-Null
+        Start-Sleep -Seconds 5
+    } else {
+        Write-Mensagem "Não foi possível localizar o ficheiro .inf na pasta extraída." "Erro"
+        return $false
     }
-    else {
-        # Metodo 2: Usar expand (nativo do Windows)
-        expand.exe "$arquivoDriver" -F:* "$pastaExtracao" 2>&1 | Out-Null
-        
-        # Metodo 3: Executar com parametro de extracao
-        if ((Get-ChildItem -Path $pastaExtracao -Recurse -ErrorAction SilentlyContinue).Count -eq 0) {
-            Start-Process $arquivoDriver -ArgumentList "/extract_all:$pastaExtracao","/S" -Wait -NoNewWindow -ErrorAction SilentlyContinue
-        }
-        
-        # Metodo 4: Parametro alternativo
-        if ((Get-ChildItem -Path $pastaExtracao -Recurse -ErrorAction SilentlyContinue).Count -eq 0) {
-            Start-Process $arquivoDriver -ArgumentList "-extract:$pastaExtracao","-silent" -Wait -NoNewWindow -ErrorAction SilentlyContinue
-        }
-    }
-    
-    # Procurar arquivo INF
-    Write-Host "Procurando driver especifico..." -ForegroundColor Gray
-    
-    $arquivosInf = Get-ChildItem -Path $pastaExtracao -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue | 
-                   Where-Object { 
-                       $_.Name -notlike "*autorun*" -and 
-                       $_.Name -notlike "*setup*" 
-                   }
-    
-    # Filtrar INF que contenha o modelo especifico
-    $infEspecifico = $arquivosInf | Where-Object {
-        $conteudo = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue
-        $conteudo -match $filtroDriver
-    } | Select-Object -First 1
-    
-    # Se nao achar com filtro, pegar o primeiro INF valido
-    if (-not $infEspecifico) {
-        $infEspecifico = $arquivosInf | Select-Object -First 1
-    }
-    
-    if ($infEspecifico) {
-        Write-Host "Arquivo INF encontrado: $($infEspecifico.Name)" -ForegroundColor Green
-        Write-Host "Instalando driver via pnputil..." -ForegroundColor Gray
-        
-        try {
-            # Instalar driver via pnputil
-            $resultado = & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1
-            
-            # Verificar se instalou com sucesso
-            if ($LASTEXITCODE -eq 0 -or $resultado -match "successfully|instalado") {
-                Write-Mensagem "Driver injetado com sucesso!" "Sucesso"
-                Start-Sleep -Seconds 5
-            }
-            else {
-                Write-Mensagem "pnputil retornou codigo $LASTEXITCODE" "Aviso"
-                Write-Host "Saida: $resultado" -ForegroundColor Gray
-            }
-        }
-        catch {
-            Write-Mensagem "Erro ao executar pnputil: $($_.Exception.Message)" "Erro"
-        }
-    }
-    else {
-        Write-Mensagem "Arquivo INF nao encontrado, usando instalacao padrao" "Aviso"
-        Write-Host "Instalando via executavel..." -ForegroundColor Gray
-        Start-Process $arquivoDriver -ArgumentList "/S" -Wait -NoNewWindow
-        Start-Sleep -Seconds $Global:Config.TempoEspera
-    }
-    
-    # Limpar pasta de extracao
-    Remove-Item $pastaExtracao -Recurse -Force -ErrorAction SilentlyContinue
-    
+
+    # 5. CONFIGURAÇÃO FINAL DA IMPRESSORA
     New-PortaIP -enderecoIP $enderecoIP | Out-Null
     
-    Write-Host "Configurando fila de impressao..." -ForegroundColor Gray
-    
-    # Buscar driver especifico instalado
-    $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue | 
-                       Where-Object { 
-                           $_.Name -like "*$filtroDriver*" -and
-                           $_.Name -notlike "*PCL*" -and 
-                           $_.Name -notlike "* PS" -and
-                           $_.Name -notlike "*Universal Print Driver*"
-                       } | Select-Object -First 1
-    
-    # Buscar fila generica criada automaticamente
-    $filaGenerica = Get-Printer -ErrorAction SilentlyContinue | 
-                    Where-Object {
-                        $_.Name -like "*Samsung Universal Print Driver*" -or
-                        $_.DriverName -like "*Samsung Universal Print Driver*"
-                    } | Select-Object -First 1
-    
     try {
-        if ($filaGenerica -and $driverEspecifico) {
-            # Cenario 1: Trocar driver da fila generica e renomear
-            Write-Host "Trocando para driver especifico: $($driverEspecifico.Name)" -ForegroundColor Green
-            Set-Printer -Name $filaGenerica.Name -DriverName $driverEspecifico.Name -PortName $enderecoIP -ErrorAction Stop
-            Rename-Printer -Name $filaGenerica.Name -NewName $nomeImpressora -ErrorAction Stop
-            Write-Mensagem "Impressora configurada com driver especifico!" "Sucesso"
-            return $true
-        }
-        elseif ($driverEspecifico) {
-            # Cenario 2: Criar nova impressora com driver especifico
-            Write-Host "Criando impressora com driver: $($driverEspecifico.Name)" -ForegroundColor Green
-            Add-Printer -Name $nomeImpressora -DriverName $driverEspecifico.Name -PortName $enderecoIP -ErrorAction Stop
-            Write-Mensagem "Impressora configurada com driver especifico!" "Sucesso"
-            return $true
-        }
-        elseif ($filaGenerica) {
-            # Cenario 3: Renomear fila generica (driver especifico nao encontrado)
-            Set-Printer -Name $filaGenerica.Name -PortName $enderecoIP -ErrorAction Stop
-            Rename-Printer -Name $filaGenerica.Name -NewName $nomeImpressora -ErrorAction Stop
-            Write-Mensagem "Impressora configurada com driver universal" "Aviso"
-            Write-Host "NOTA: Driver especifico '$filtroDriver' nao foi detectado" -ForegroundColor Yellow
-            return $true
-        }
-        else {
-            # Cenario 4: Criar manualmente com filtro
-            Add-Printer -Name $nomeImpressora -DriverName $filtroDriver -PortName $enderecoIP -ErrorAction Stop
-            Write-Mensagem "Impressora configurada!" "Sucesso"
-            return $true
-        }
+        # Busca o nome exato que o Windows deu ao driver após a injeção
+        $driverFinal = Get-PrinterDriver | Where-Object { $_.Name -like "*$filtroDriver*" } | Select-Object -First 1
+        $nomeParaUsar = if ($driverFinal) { $driverFinal.Name } else { $filtroDriver }
+
+        Write-Host "Criando fila de impressão..." -ForegroundColor Gray
+        Add-Printer -Name $nomeImpressora -DriverName $nomeParaUsar -PortName $enderecoIP -ErrorAction Stop
+        
+        Write-Mensagem "Instalação da M4080 concluída com Driver Nativo!" "Sucesso"
+        return $true
     }
     catch {
-        Write-Mensagem "Falha ao configurar impressora: $($_.Exception.Message)" "Erro"
-        
-        Write-Host "`nDrivers Samsung disponiveis:"
-        Get-PrinterDriver -ErrorAction SilentlyContinue | 
-            Where-Object { $_.Name -like "*Samsung*" } | 
-            ForEach-Object { Write-Host "  - $($_.Name)" }
-        
-        Read-Host "`nPressione ENTER para continuar"
+        Write-Mensagem "Falha ao associar o driver injetado: $($_.Exception.Message)" "Erro"
         return $false
+    }
+    finally {
+        # Limpeza opcional da pasta temporária de extração
+        # Remove-Item $pastaExtrair -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -757,6 +650,7 @@ if ($instalarPrint) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
 
 
 
