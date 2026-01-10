@@ -601,9 +601,8 @@ if ($instalarScan) {
                 Write-Host "Instalando driver de scan..." -ForegroundColor Gray
                 Start-Process $arquivoScan -ArgumentList "/S" -Wait -NoNewWindow
                 Write-Mensagem "Driver de scan instalado!" "Sucesso"
+                }
             }
-        }
-    }
     
     $etapaAtual++
     Write-Host ""
@@ -730,6 +729,7 @@ elseif ($instalarPrint -and -not $instalacaoSucesso) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
 
 
 
