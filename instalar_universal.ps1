@@ -190,17 +190,24 @@ function Test-DriverExistente {
     return @{ Encontrado = $false; Driver = $null; Tipo = $null }
 }
 
-function Test-DriverScanExistente {
-    param([Parameter(Mandatory=$true)][string]$nomeModelo)
+    function Test-DriverScanExistente {
+        param([Parameter(Mandatory=$true)][string]$nomeModelo)
+        
+        # Remove espacos para criar um filtro flexivel
+        $filtro = "*$($nomeModelo -replace '\s+', '*')*"
     
-    $filtroScan = $nomeModelo -replace '\s+', '.*'
+        # 1. Tenta detectar pelo Hardware de Imagem (WIA/Scanner)
+        $dispositivo = Get-PnpDevice -Class Image -ErrorAction SilentlyContinue | 
+                       Where-Object { $_.FriendlyName -like $filtro -or $_.Name -like $filtro }
     
-    $programas = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", 
-                                  "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
-                Where-Object { $_.DisplayName -like "*$nomeModelo*" -and $_.DisplayName -like "*Scan*" }
+        # 2. Se nao achou no hardware, tenta no Registro (seu codigo original otimizado)
+        $registro = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", 
+                                     "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+                    Where-Object { $_.DisplayName -like $filtro -and $_.DisplayName -like "*Scan*" }
     
-    return [bool]$programas
-}
+        # Se encontrar em qualquer um dos dois, retorna True (nao instala de novo)
+        return ([bool]$dispositivo -or [bool]$registro)
+    }
 
 function Install-DriverSPL {
     param(
@@ -355,11 +362,8 @@ function Install-DriverUPD {
                      Select-Object -First 1
     
     if ($infEspecifico) {
-        Write-Host "Instalando driver via pnputil..." -ForegroundColor Gray
         & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1 | Out-Null
         Start-Sleep -Seconds 3
-        
-        Write-Host "Registrando driver de impressora..." -ForegroundColor Gray
         
         $infNoDriverStore = Get-ChildItem "C:\Windows\System32\DriverStore\FileRepository\" -Recurse -Filter $infEspecifico.Name -ErrorAction SilentlyContinue | Select-Object -First 1
         
@@ -748,4 +752,5 @@ elseif ($instalarPrint -and -not $instalacaoSucesso) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
 
