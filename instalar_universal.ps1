@@ -320,30 +320,46 @@ function Install-DriverUPD {
     $arquivoDriver = Get-ArquivoLocal -url $urlDriver -nomeDestino $nomeArquivo
     if (-not $arquivoDriver) { return $false }
 
-    # 3. EXTRAÇÃO MANUAL DO INF (A lógica que funcionou anteriormente)
+    # 3. EXTRAÇÃO MANUAL (Tentativa com comandos alternativos que funcionam na Samsung)
     Write-Host "Extraindo pacotes de driver para $nomeModelo..." -ForegroundColor Gray
     $pastaExtrair = Join-Path $Global:Config.CaminhoTemp "Extraido_$nomeModelo"
     if (!(Test-Path $pastaExtrair)) { New-Item $pastaExtrair -ItemType Directory -Force | Out-Null }
 
-    # O comando /x extrai o conteúdo. O /s torna-o silencioso.
-    Start-Process $arquivoDriver -ArgumentList "/x`"$pastaExtrair`" /s" -Wait -NoNewWindow
+    # Tenta extração padrão da Samsung/HP
+    Start-Process $arquivoDriver -ArgumentList "/x`"$pastaExtrair`" /s /f" -Wait -NoNewWindow
+    
+    # Se a pasta continuar vazia, tenta o comando alternativo (-extract)
+    if ((Get-ChildItem $pastaExtrair).Count -eq 0) {
+        Start-Process $arquivoDriver -ArgumentList "-extract `"$pastaExtrair`"" -Wait -NoNewWindow
+    }
 
-    # 4. LOCALIZAR E INJETAR O INF NO WINDOWS
-    Write-Host "Procurando ficheiro .inf específico (ignoring PCL/PS)..." -ForegroundColor Gray
-    $infFile = Get-ChildItem -Path $pastaExtrair -Filter "*.inf" -Recurse | 
-               Where-Object { $_.FullName -match "m408" -and $_.FullName -notmatch "pcl|ps" } | 
-               Select-Object -First 1
+    # 4. LOCALIZAR O INF (Busca profunda e flexível)
+    Write-Host "Procurando ficheiro .inf..." -ForegroundColor Gray
+    
+    # Busca em todas as subpastas, priorizando arquivos que não sejam PCL ou PS
+    $todosInfs = Get-ChildItem -Path $pastaExtrair -Filter "*.inf" -Recurse
+    
+    $infFile = $todosInfs | Where-Object { 
+        $_.FullName -match "m408" -and 
+        $_.FullName -notmatch "pcl" -and 
+        $_.FullName -notmatch "ps" 
+    } | Select-Object -First 1
+
+    # Se ainda não achou com o filtro rígido, pega o primeiro INF que encontrar de impressora
+    if (-not $infFile) {
+        $infFile = $todosInfs | Where-Object { $_.Content -match "Class=Printer" -or $_.FullName -match "ss" } | Select-Object -First 1
+    }
 
     if ($infFile) {
-        Write-Mensagem "Injetando driver via PNPUtil: $($infFile.Name)" "Info"
-        # Força o registo do driver no DriverStore do Windows
+        Write-Mensagem "INF encontrado em: $($infFile.FullName)" "Sucesso"
         pnputil /add-driver $infFile.FullName /install | Out-Null
         Start-Sleep -Seconds 5
     } else {
-        Write-Mensagem "Não foi possível localizar o ficheiro .inf na pasta extraída." "Erro"
+        Write-Mensagem "ERRO: Pasta de extração contém arquivos, mas nenhum .inf válido foi detectado." "Erro"
+        # Lista o que tem na pasta para você diagnosticar
+        Get-ChildItem $pastaExtrair -Recurse | Select-Object -First 5
         return $false
     }
-
     # 5. CONFIGURAÇÃO FINAL DA IMPRESSORA
     New-PortaIP -enderecoIP $enderecoIP | Out-Null
     
@@ -650,6 +666,7 @@ if ($instalarPrint) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
 
 
 
