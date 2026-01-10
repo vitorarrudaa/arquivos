@@ -193,21 +193,26 @@ function Test-DriverExistente {
     function Test-DriverScanExistente {
         param([Parameter(Mandatory=$true)][string]$nomeModelo)
         
-        # Remove espacos para criar um filtro flexivel
-        $filtro = "*$($nomeModelo -replace '\s+', '*')*"
+        # 1. Extrai apenas os 3 primeiros digitos numéricos (Ex: de "M4020" vira "402")
+        # Isso faz com que a busca encontre a série "407x"
+        if ($nomeModelo -match '(\d{3})\d?') { 
+            $baseNumerica = $Matches[1] 
+        } else {
+            $baseNumerica = $nomeModelo
+        }
     
-        # 1. Tenta detectar pelo Hardware de Imagem (WIA/Scanner)
-        $dispositivo = Get-PnpDevice -Class Image -ErrorAction SilentlyContinue | 
-                       Where-Object { $_.FriendlyName -like $filtro -or $_.Name -like $filtro }
-    
-        # 2. Se nao achou no hardware, tenta no Registro (seu codigo original otimizado)
+        # 2. Busca no Registro de Desinstalação (onde o nome que você passou está gravado)
         $registro = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", 
                                      "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
-                    Where-Object { $_.DisplayName -like $filtro -and $_.DisplayName -like "*Scan*" }
+                    Where-Object { 
+                        $n = $_.DisplayName
+                        # Critério: Tem que ter Samsung + os 3 números base + Scan ou Series
+                        ($n -like "*Samsung*" -and $n -like "*$baseNumerica*" -and ($n -like "*Scan*" -or $n -like "*Series*"))
+                    }
     
-        # Se encontrar em qualquer um dos dois, retorna True (nao instala de novo)
-        return ([bool]$dispositivo -or [bool]$registro)
-    }
+        # 3. Retorno booleano para o seu IF no instalar_universal
+        return [bool]$registro
+}
 
 function Install-DriverSPL {
     param(
@@ -752,5 +757,6 @@ elseif ($instalarPrint -and -not $instalacaoSucesso) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
 
 
