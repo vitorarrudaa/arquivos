@@ -299,6 +299,7 @@ function Install-DriverUPD {
     
     $statusDriver = Test-DriverExistente -filtroDriver $filtroDriver
     
+    # 1. Se o driver já existe, apenas cria a impressora
     if ($statusDriver.Encontrado -and $statusDriver.Tipo -eq "Nativo") {
         Write-Host ""
         Write-Mensagem "Driver '$($statusDriver.Driver)' ja presente no sistema" "Sucesso"
@@ -316,55 +317,59 @@ function Install-DriverUPD {
         }
     }
     
+    # 2. Download do Driver
     Write-Host ""
     $nomeArquivo = "driver_UPD_" + ($nomeModelo -replace '\s+', '_') + ".exe"
     $arquivoDriver = Get-ArquivoLocal -url $urlDriver -nomeDestino $nomeArquivo
     
     if (-not $arquivoDriver) { return $false }
     
-    $pastaExtracao = Join-Path $Global:Config.CaminhoTemp ("UPD_Extract_" + [guid]::NewGuid().ToString().Substring(0,8))
+    # 3. Preparação da Pasta de Extração
+    $pastaExtracao = Join-Path $env:TEMP ("UPD_Extract_" + [guid]::NewGuid().ToString().Substring(0,8))
     New-Item -Path $pastaExtracao -ItemType Directory -Force | Out-Null
     
     Write-Host "Extraindo pacote de drivers..." -ForegroundColor Gray
     
-    $7zipPath = "${env:ProgramFiles}\7-Zip\7z.exe"
-    if (Test-Path $7zipPath) {
-        & $7zipPath x "$arquivoDriver" "-o$pastaExtracao" -y | Out-Null
-    } else {
+    # Método de extração compatível: tenta extrair via comando do próprio executável
+    # Muitos drivers Samsung/HP aceitam o parâmetro /extract ou /x
+    Start-Process $arquivoDriver -ArgumentList "/extract:$pastaExtracao", "/S" -Wait -NoNewWindow -ErrorAction SilentlyContinue
+    
+    # Fallback caso a extração acima falhe (usa expand.exe nativo do Windows)
+    if ((Get-ChildItem $pastaExtracao).Count -eq 0) {
         expand.exe "$arquivoDriver" -F:* "$pastaExtracao" 2>&1 | Out-Null
-        
-        if ((Get-ChildItem -Path $pastaExtracao -Recurse -ErrorAction SilentlyContinue).Count -eq 0) {
-            Start-Process $arquivoDriver -ArgumentList "/extract_all:$pastaExtracao","/S" -Wait -NoNewWindow -ErrorAction SilentlyContinue
-        }
     }
     
+    # 4. Localização do arquivo INF
     $infEspecifico = Get-ChildItem -Path $pastaExtracao -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue | 
                      Where-Object { $_.Name -notlike "*autorun*" -and $_.Name -notlike "*setup*" } |
                      Select-Object -First 1
     
     if ($infEspecifico) {
-        & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1 | Out-Null
+        Write-Host "Instalando driver no sistema..." -ForegroundColor Gray
+        
+        # Sintaxe compatível com Windows 10 e 11 (-i -a)
+        & pnputil.exe -i -a "$($infEspecifico.FullName)" | Out-Null
         Start-Sleep -Seconds 3
         
-        $infNoDriverStore = Get-ChildItem "C:\Windows\System32\DriverStore\FileRepository\" -Recurse -Filter $infEspecifico.Name -ErrorAction SilentlyContinue | Select-Object -First 1
-        
-        if ($infNoDriverStore) {
-            $argumentos = "/ia /m `"$filtroDriver`" /f `"$($infNoDriverStore.FullName)`""
-            Start-Process "rundll32.exe" -ArgumentList "printui.dll,PrintUIEntry $argumentos" -Wait -NoNewWindow -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 2
-        }
+        # Instalação formal via PrintUI (crucial para o Driver aparecer na lista de Add-Printer)
+        # Usamos aspas duplas escapadas para garantir que o Windows 10 entenda caminhos com espaços
+        $argumentos = "/ia /m ""$filtroDriver"" /f ""$($infEspecifico.FullName)"""
+        Start-Process "rundll32.exe" -ArgumentList "printui.dll,PrintUIEntry $argumentos" -Wait -NoNewWindow
+        Start-Sleep -Seconds 2
     } else {
-        Write-Host "Instalando via metodo padrao..." -ForegroundColor Gray
+        Write-Host "INF nao encontrado, tentando instalador padrao..." -ForegroundColor Gray
         Start-Process $arquivoDriver -ArgumentList "/S" -Wait -NoNewWindow
-        Start-Sleep -Seconds $Global:Config.TempoEspera
+        Start-Sleep -Seconds 5
     }
     
+    # Limpeza
     Remove-Item $pastaExtracao -Recurse -Force -ErrorAction SilentlyContinue
     
+    # 5. Configuração Final da Fila de Impressão
     New-PortaIP -enderecoIP $enderecoIP | Out-Null
-    
     Write-Host "Configurando fila de impressao..." -ForegroundColor Gray
     
+    # Busca o driver exato instalado
     $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue | 
                        Where-Object { 
                            $_.Name -like "*$filtroDriver*" -and
@@ -384,34 +389,20 @@ function Install-DriverUPD {
             Set-Printer -Name $filaGenerica.Name -DriverName $driverEspecifico.Name -PortName $enderecoIP -ErrorAction Stop
             Rename-Printer -Name $filaGenerica.Name -NewName $nomeImpressora -ErrorAction Stop
             Write-Mensagem "Impressora configurada com driver especifico!" "Sucesso"
-            return $true
         }
         elseif ($driverEspecifico) {
             Add-Printer -Name $nomeImpressora -DriverName $driverEspecifico.Name -PortName $enderecoIP -ErrorAction Stop
             Write-Mensagem "Impressora configurada com driver especifico!" "Sucesso"
-            return $true
-        }
-        elseif ($filaGenerica) {
-            Set-Printer -Name $filaGenerica.Name -PortName $enderecoIP -ErrorAction Stop
-            Rename-Printer -Name $filaGenerica.Name -NewName $nomeImpressora -ErrorAction Stop
-            Write-Mensagem "Impressora configurada com driver universal" "Aviso"
-            return $true
         }
         else {
+            # Fallback final: tenta criar com o nome do filtro fornecido
             Add-Printer -Name $nomeImpressora -DriverName $filtroDriver -PortName $enderecoIP -ErrorAction Stop
             Write-Mensagem "Impressora configurada!" "Sucesso"
-            return $true
         }
+        return $true
     }
     catch {
-        Write-Mensagem "Falha ao configurar impressora: $($_.Exception.Message)" "Erro"
-        
-        Write-Host "`nDrivers Samsung disponiveis:"
-        Get-PrinterDriver -ErrorAction SilentlyContinue | 
-            Where-Object { $_.Name -like "*Samsung*" } | 
-            ForEach-Object { Write-Host "  - $($_.Name)" }
-        
-        Read-Host "`nPressione ENTER para continuar"
+        Write-Mensagem "Erro na configuracao final: $($_.Exception.Message)" "Erro"
         return $false
     }
 }
@@ -729,6 +720,7 @@ elseif ($instalarPrint -and -not $instalacaoSucesso) {
 
 Write-Host ""
 Start-Sleep -Seconds 2
+
 
 
 
