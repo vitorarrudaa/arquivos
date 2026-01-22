@@ -1,6 +1,6 @@
 # ================================================================================
 # SCRIPT: Motor de Instalacao Universal - Impressoras Samsung
-# VERSAO: 3.5 (Extracao Nativa - Sem Dependencias)
+# VERSAO: 3.4 (Corrigido - Sem Duplicacoes)
 # DESCRICAO: Instalador modular para drivers Samsung SPL e UPD
 # ================================================================================
 
@@ -108,73 +108,6 @@ function Get-ArquivoLocal {
         Read-Host "Pressione ENTER para continuar"
         return $null
     }
-}
-
-function Expand-ArquivoNativo {
-    param(
-        [string]$ArquivoOrigem,
-        [string]$PastaDestino
-    )
-    
-    # Limpar pasta destino se existir
-    if (Test-Path $PastaDestino) {
-        Remove-Item $PastaDestino -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    New-Item -Path $PastaDestino -ItemType Directory -Force | Out-Null
-    
-    Write-Host "Extraindo pacote de drivers..." -ForegroundColor Gray
-    
-    # TENTATIVA 1: Expand-Archive (ZIP nativo do PowerShell)
-    try {
-        $zipTemp = Join-Path $Global:Config.CaminhoTemp ("temp_" + [guid]::NewGuid().ToString().Substring(0,8) + ".zip")
-        Copy-Item $ArquivoOrigem $zipTemp -Force
-        
-        Expand-Archive -Path $zipTemp -DestinationPath $PastaDestino -Force -ErrorAction Stop
-        Remove-Item $zipTemp -Force -ErrorAction SilentlyContinue
-        
-        if ((Get-ChildItem -Path $PastaDestino -Recurse -ErrorAction SilentlyContinue).Count -gt 0) {
-            Write-Host "Extracao concluida (metodo ZIP)" -ForegroundColor Gray
-            return $true
-        }
-    } catch {
-        Remove-Item $zipTemp -Force -ErrorAction SilentlyContinue
-    }
-    
-    # TENTATIVA 2: Parametro /extract_all (comum em instaladores HP/Samsung)
-    try {
-        Start-Process $ArquivoOrigem -ArgumentList "/extract_all:`"$PastaDestino`"","/S" -Wait -NoNewWindow -ErrorAction Stop
-        Start-Sleep -Seconds 2
-        
-        if ((Get-ChildItem -Path $PastaDestino -Recurse -ErrorAction SilentlyContinue).Count -gt 0) {
-            Write-Host "Extracao concluida (metodo extract_all)" -ForegroundColor Gray
-            return $true
-        }
-    } catch {}
-    
-    # TENTATIVA 3: Parametro /extract (variacao)
-    try {
-        Start-Process $ArquivoOrigem -ArgumentList "/extract","`"$PastaDestino`"","/quiet" -Wait -NoNewWindow -ErrorAction Stop
-        Start-Sleep -Seconds 2
-        
-        if ((Get-ChildItem -Path $PastaDestino -Recurse -ErrorAction SilentlyContinue).Count -gt 0) {
-            Write-Host "Extracao concluida (metodo extract)" -ForegroundColor Gray
-            return $true
-        }
-    } catch {}
-    
-    # TENTATIVA 4: expand.exe do Windows (para CAB/MSI)
-    try {
-        & expand.exe "$ArquivoOrigem" -F:* "$PastaDestino" 2>&1 | Out-Null
-        Start-Sleep -Seconds 1
-        
-        if ((Get-ChildItem -Path $PastaDestino -Recurse -ErrorAction SilentlyContinue).Count -gt 0) {
-            Write-Host "Extracao concluida (metodo expand.exe)" -ForegroundColor Gray
-            return $true
-        }
-    } catch {}
-    
-    Write-Mensagem "Nenhum metodo de extracao foi bem-sucedido" "Aviso"
-    return $false
 }
 
 function New-PortaIP {
@@ -401,44 +334,46 @@ function Install-DriverUPD {
     if (-not $arquivoDriver) { return $false }
     
     $pastaExtracao = Join-Path $Global:Config.CaminhoTemp ("UPD_Extract_" + [guid]::NewGuid().ToString().Substring(0,8))
+    New-Item -Path $pastaExtracao -ItemType Directory -Force | Out-Null
     
-    # Tentar extrair usando metodos nativos do Windows
-    $extracaoSucesso = Expand-ArquivoNativo -ArquivoOrigem $arquivoDriver -PastaDestino $pastaExtracao
+    Write-Host "Extraindo pacote de drivers..." -ForegroundColor Gray
     
-    if ($extracaoSucesso) {
-        # Procurar arquivo .inf especifico
-        $infEspecifico = Get-ChildItem -Path $pastaExtracao -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue | 
-                         Where-Object { $_.Name -notlike "*autorun*" -and $_.Name -notlike "*setup*" } |
-                         Select-Object -First 1
-        
-        if ($infEspecifico) {
-            Write-Host "Instalando driver via pnputil..." -ForegroundColor Gray
-            & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1 | Out-Null
-            Start-Sleep -Seconds 3
-            
-            Write-Host "Registrando driver de impressora..." -ForegroundColor Gray
-            
-            $infNoDriverStore = Get-ChildItem "C:\Windows\System32\DriverStore\FileRepository\" -Recurse -Filter $infEspecifico.Name -ErrorAction SilentlyContinue | Select-Object -First 1
-            
-            if ($infNoDriverStore) {
-                $argumentos = "/ia /m `"$filtroDriver`" /f `"$($infNoDriverStore.FullName)`""
-                Start-Process "rundll32.exe" -ArgumentList "printui.dll,PrintUIEntry $argumentos" -Wait -NoNewWindow -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 2
-            }
-        } else {
-            Write-Mensagem "Arquivo .inf nao encontrado. Instalando via metodo padrao..." "Aviso"
-            Start-Process $arquivoDriver -ArgumentList "/S" -Wait -NoNewWindow
-            Start-Sleep -Seconds $Global:Config.TempoEspera
-        }
-        
-        Remove-Item $pastaExtracao -Recurse -Force -ErrorAction SilentlyContinue
+    $7zipPath = "${env:ProgramFiles}\7-Zip\7z.exe"
+    if (Test-Path $7zipPath) {
+        & $7zipPath x "$arquivoDriver" "-o$pastaExtracao" -y | Out-Null
     } else {
-        # Se falhou a extracao, instalar diretamente
-        Write-Mensagem "Instalando via metodo direto..." "Info"
+        expand.exe "$arquivoDriver" -F:* "$pastaExtracao" 2>&1 | Out-Null
+        
+        if ((Get-ChildItem -Path $pastaExtracao -Recurse -ErrorAction SilentlyContinue).Count -eq 0) {
+            Start-Process $arquivoDriver -ArgumentList "/extract_all:$pastaExtracao","/S" -Wait -NoNewWindow -ErrorAction SilentlyContinue
+        }
+    }
+    
+    $infEspecifico = Get-ChildItem -Path $pastaExtracao -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue | 
+                     Where-Object { $_.Name -notlike "*autorun*" -and $_.Name -notlike "*setup*" } |
+                     Select-Object -First 1
+    
+    if ($infEspecifico) {
+        Write-Host "Instalando driver via pnputil..." -ForegroundColor Gray
+        & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1 | Out-Null
+        Start-Sleep -Seconds 3
+        
+        Write-Host "Registrando driver de impressora..." -ForegroundColor Gray
+        
+        $infNoDriverStore = Get-ChildItem "C:\Windows\System32\DriverStore\FileRepository\" -Recurse -Filter $infEspecifico.Name -ErrorAction SilentlyContinue | Select-Object -First 1
+        
+        if ($infNoDriverStore) {
+            $argumentos = "/ia /m `"$filtroDriver`" /f `"$($infNoDriverStore.FullName)`""
+            Start-Process "rundll32.exe" -ArgumentList "printui.dll,PrintUIEntry $argumentos" -Wait -NoNewWindow -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+        }
+    } else {
+        Write-Host "Instalando via metodo padrao..." -ForegroundColor Gray
         Start-Process $arquivoDriver -ArgumentList "/S" -Wait -NoNewWindow
         Start-Sleep -Seconds $Global:Config.TempoEspera
-        Remove-Item $pastaExtracao -Recurse -Force -ErrorAction SilentlyContinue
     }
+    
+    Remove-Item $pastaExtracao -Recurse -Force -ErrorAction SilentlyContinue
     
     New-PortaIP -enderecoIP $enderecoIP | Out-Null
     
@@ -641,8 +576,7 @@ if ($instalarPrint) {
         $enderecoIP = Read-Host "- Endereco IP"
         Write-Host ""
         
-        if ($enderecoIP -notmatch '^\d{1,3}(\.\d{1,3}){3}
-        ) {
+        if ($enderecoIP -notmatch '^\d{1,3}(\.\d{1,3}){3}$') {
             Write-Mensagem "IP invalido! Use formato XXX.XXX.XXX.XXX" "Erro"
             Write-Host ""
             continue
