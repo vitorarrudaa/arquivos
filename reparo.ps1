@@ -127,27 +127,24 @@ function Remove-ImpressorasEDriverEspecifico {
         [string]$nomeDriver
     )
     
-    Write-Host "`n>> Analisando sistema..." -ForegroundColor Cyan
-    
     # Busca impressoras que usam este driver
     $impressorasUsando = Get-Printer -ErrorAction SilentlyContinue | 
                          Where-Object { $_.DriverName -eq $nomeDriver }
     
     $totalImpressoras = if ($impressorasUsando) { $impressorasUsando.Count } else { 0 }
     
-    Write-Host "   [INFO] Impressoras encontradas: $totalImpressoras" -ForegroundColor Gray
-    
-    if ($totalImpressoras -gt 0) {
-        Write-Host "`n   Impressoras que serao removidas:" -ForegroundColor Yellow
-        foreach ($imp in $impressorasUsando) {
-            Write-Host "     - $($imp.Name) [$($imp.PortName)]" -ForegroundColor Gray
-        }
-    }
-    
     Write-Host "`n========================================" -ForegroundColor Yellow
     Write-Host "ATENCAO! ESSA OPERACAO VAI REMOVER:" -ForegroundColor Yellow
     Write-Host "   - $totalImpressoras IMPRESSORA(S)" -ForegroundColor Yellow
     Write-Host "   - 1 DRIVER(S)" -ForegroundColor Yellow
+    
+    if ($totalImpressoras -gt 0) {
+        Write-Host "`nImpressoras:" -ForegroundColor Yellow
+        foreach ($imp in $impressorasUsando) {
+            Write-Host "   - $($imp.Name) [$($imp.PortName)]" -ForegroundColor Gray
+        }
+    }
+    
     Write-Host "========================================`n" -ForegroundColor Yellow
     
     $confirmar = Read-OpcaoValidada "DESEJA PROSSEGUIR? [S/N]" @("S","s","N","n")
@@ -162,13 +159,12 @@ function Remove-ImpressorasEDriverEspecifico {
         Write-Host "`n>> Removendo impressoras..." -ForegroundColor Cyan
         
         foreach ($impressora in $impressorasUsando) {
-            Write-Host "   Removendo: $($impressora.Name)..." -ForegroundColor Gray
             try {
                 Remove-Printer -Name $impressora.Name -Confirm:$false -ErrorAction Stop
-                Write-Host "   [OK] Removida" -ForegroundColor Green
+                Write-Host "   [OK] $($impressora.Name)" -ForegroundColor Green
             }
             catch {
-                Write-Host "   [ERRO] $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "   [ERRO] $($impressora.Name): $($_.Exception.Message)" -ForegroundColor Red
             }
         }
         
@@ -180,21 +176,14 @@ function Remove-ImpressorasEDriverEspecifico {
     
     try {
         Stop-Service Spooler -Force -ErrorAction Stop
-        Write-Host "   [OK] Spooler parado" -ForegroundColor Green
-        
         Start-Sleep -Seconds 2
-        
         Remove-Item "$env:SystemRoot\System32\Spool\Printers\*" -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "   [OK] Cache limpo" -ForegroundColor Green
-        
         Start-Service Spooler -ErrorAction Stop
-        Write-Host "   [OK] Spooler reiniciado" -ForegroundColor Green
-        
+        Write-Host "   [OK] Spooler limpo e reiniciado" -ForegroundColor Green
         Start-Sleep -Seconds 2
     }
     catch {
-        Write-Host "   [ERRO] Falha: $($_.Exception.Message)" -ForegroundColor Red
-        
+        Write-Host "   [ERRO] Falha na limpeza do spooler" -ForegroundColor Red
         try {
             Start-Service Spooler -ErrorAction SilentlyContinue
         }
