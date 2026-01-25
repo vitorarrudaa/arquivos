@@ -1,6 +1,6 @@
 # ================================================================================
 # SCRIPT: Menu Principal - Sistema de Instalacao de Impressoras Samsung
-# VERSAO: 2.1 (Otimizado e Corrigido)
+# VERSAO: 2.2 (Com integração de Reparo)
 # DESCRICAO: Menu interativo para instalacao remota de drivers Samsung
 # ================================================================================
 
@@ -27,6 +27,7 @@ $Paths = @{
     Raiz   = "$env:USERPROFILE\Downloads\Suporte_Tech3"
     CSV    = "$env:USERPROFILE\Downloads\Suporte_Tech3\dados_impressoras.csv"
     Motor  = "$env:USERPROFILE\Downloads\Suporte_Tech3\instalar_universal.ps1"
+    Reparo = "$env:USERPROFILE\Downloads\Suporte_Tech3\reparo.ps1"
 }
 
 # Criar diretorio se nao existir
@@ -48,6 +49,12 @@ function Sync-GitHubFiles {
         # Download do script de instalacao
         Invoke-WebRequest -Uri "$($Config.BaseUrl)/instalar_universal.ps1" `
                          -OutFile $Paths.Motor `
+                         -ErrorAction Stop `
+                         -UseBasicParsing
+        
+        # Download do script de reparo
+        Invoke-WebRequest -Uri "$($Config.BaseUrl)/reparo.ps1" `
+                         -OutFile $Paths.Reparo `
                          -ErrorAction Stop `
                          -UseBasicParsing
         
@@ -98,6 +105,7 @@ function Show-ModelMenu {
     }
     
     Write-Host ""
+    Write-Host "  R) Reparar/Remover Drivers" -ForegroundColor Yellow
     Write-Host "  Q) Sair" -ForegroundColor Gray
     Write-Host ""
 }
@@ -158,6 +166,24 @@ function Invoke-Installation {
     }
 }
 
+# --- FUNCAO: EXECUTAR REPARO ---
+function Invoke-Reparo {
+    try {
+        if (-not (Test-Path $Paths.Reparo)) {
+            Write-Host "`n[ERRO] Script de reparo nao encontrado: $($Paths.Reparo)" -ForegroundColor Red
+            Read-Host "Pressione ENTER para continuar"
+            return
+        }
+        
+        & $Paths.Reparo -csvPath $Paths.CSV
+    }
+    catch {
+        Write-Host "`n[ERRO] Falha ao executar reparo" -ForegroundColor Red
+        Write-Host "Detalhes: $($_.Exception.Message)`n" -ForegroundColor Red
+        Read-Host "Pressione ENTER para continuar"
+    }
+}
+
 # --- SINCRONIZACAO INICIAL ---
 if (-not (Sync-GitHubFiles)) {
     exit
@@ -171,7 +197,13 @@ $listaImpressoras = Get-PrinterData
 
 do {
     Show-ModelMenu -listaModelos $listaImpressoras
-    $escolhaModelo = Read-Host "Escolha o ID do modelo ou (Q) para sair"
+    $escolhaModelo = Read-Host "Escolha o ID do modelo, (R) para Reparar ou (Q) para sair"
+    
+    # Executar Reparo
+    if ($escolhaModelo -eq "R" -or $escolhaModelo -eq "r") {
+        Invoke-Reparo
+        continue
+    }
     
     # Sair do sistema
     if ($escolhaModelo -eq "Q" -or $escolhaModelo -eq "q") {
@@ -301,4 +333,3 @@ do {
     }
     
 } while ($true)
-
