@@ -134,7 +134,7 @@ function Remove-DriverCompleto {
         Write-Host "    ✓ Removido do sistema de impressao" -ForegroundColor Green
     }
     catch {
-        Write-Mensagem "    Falha ao remover do sistema: $($_.Exception.Message)" "Aviso"
+        Write-Host "    ⚠ Falha ao remover do sistema: $($_.Exception.Message)" -ForegroundColor Yellow
     }
     
     # Passo 2: Remoção profunda via pnputil
