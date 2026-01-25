@@ -129,11 +129,9 @@ function Remove-ImpressorasEDriverEspecifico {
     
     Write-Host "`n>> Analisando sistema..." -ForegroundColor Cyan
     
-    # Busca TODAS as impressoras do sistema
-    $todasImpressoras = Get-Printer -ErrorAction SilentlyContinue
-    
-    # Filtra as que usam este driver específico
-    $impressorasUsando = $todasImpressoras | Where-Object { $_.DriverName -eq $nomeDriver }
+    # Busca impressoras que usam este driver
+    $impressorasUsando = Get-Printer -ErrorAction SilentlyContinue | 
+                         Where-Object { $_.DriverName -eq $nomeDriver }
     
     $totalImpressoras = if ($impressorasUsando) { $impressorasUsando.Count } else { 0 }
     
@@ -159,7 +157,7 @@ function Remove-ImpressorasEDriverEspecifico {
         return $false
     }
     
-    # PASSO 1: Remove impressoras uma por uma
+    # PASSO 1: Remove impressoras
     if ($totalImpressoras -gt 0) {
         Write-Host "`n>> Removendo impressoras..." -ForegroundColor Cyan
         
@@ -174,7 +172,7 @@ function Remove-ImpressorasEDriverEspecifico {
             }
         }
         
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 2
     }
     
     # PASSO 2: Limpa spooler
@@ -184,7 +182,7 @@ function Remove-ImpressorasEDriverEspecifico {
         Stop-Service Spooler -Force -ErrorAction Stop
         Write-Host "   [OK] Spooler parado" -ForegroundColor Green
         
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 2
         
         Remove-Item "$env:SystemRoot\System32\Spool\Printers\*" -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "   [OK] Cache limpo" -ForegroundColor Green
@@ -192,7 +190,7 @@ function Remove-ImpressorasEDriverEspecifico {
         Start-Service Spooler -ErrorAction Stop
         Write-Host "   [OK] Spooler reiniciado" -ForegroundColor Green
         
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 2
     }
     catch {
         Write-Host "   [ERRO] Falha: $($_.Exception.Message)" -ForegroundColor Red
@@ -203,65 +201,16 @@ function Remove-ImpressorasEDriverEspecifico {
         catch {}
     }
     
-    # PASSO 3: Verifica se ainda existe alguma impressora
-    Write-Host "`n>> Verificando impressoras remanescentes..." -ForegroundColor Cyan
-    
-    $verificacao = Get-Printer -ErrorAction SilentlyContinue | 
-                   Where-Object { $_.DriverName -eq $nomeDriver }
-    
-    if ($verificacao) {
-        Write-Host "   [AVISO] Ainda existem $($verificacao.Count) impressora(s)" -ForegroundColor Yellow
-        
-        foreach ($v in $verificacao) {
-            Write-Host "   Forçando remocao: $($v.Name)..." -ForegroundColor Gray
-            try {
-                Remove-Printer -Name $v.Name -Confirm:$false -ErrorAction Stop
-                Write-Host "   [OK] Removida" -ForegroundColor Green
-            }
-            catch {
-                Write-Host "   [ERRO] Falha" -ForegroundColor Red
-            }
-        }
-        
-        Start-Sleep -Seconds 2
-    } else {
-        Write-Host "   [OK] Nenhuma impressora remanescente" -ForegroundColor Green
-    }
-    
-    # PASSO 4: Remove o driver
+    # PASSO 3: Remove o driver
     Write-Host "`n>> Removendo driver..." -ForegroundColor Cyan
     
     try {
         Remove-PrinterDriver -Name $nomeDriver -ErrorAction Stop
-        Write-Host "   [OK] Driver removido com sucesso" -ForegroundColor Green
+        Write-Host "   [OK] Driver removido" -ForegroundColor Green
     }
     catch {
-        Write-Host "   [ERRO] Primeira tentativa falhou: $($_.Exception.Message)" -ForegroundColor Red
-        
-        # Segunda tentativa com pipe
-        Write-Host "   [INFO] Tentando metodo alternativo..." -ForegroundColor Gray
-        
-        try {
-            Get-PrinterDriver | Where-Object { $_.Name -eq $nomeDriver } | Remove-PrinterDriver -ErrorAction Stop
-            Write-Host "   [OK] Driver removido" -ForegroundColor Green
-        }
-        catch {
-            Write-Host "   [ERRO] Nao foi possivel remover o driver" -ForegroundColor Red
-            
-            # Diagnóstico final
-            $finalCheck = Get-Printer -ErrorAction SilentlyContinue | 
-                         Where-Object { $_.DriverName -eq $nomeDriver }
-            
-            if ($finalCheck) {
-                Write-Host "`n   [DIAGNOSTICO] Impressoras ainda usando o driver:" -ForegroundColor Yellow
-                foreach ($fc in $finalCheck) {
-                    Write-Host "     - $($fc.Name) [$($fc.PortName)] Status: $($fc.PrinterStatus)" -ForegroundColor Gray
-                }
-                Write-Host "`n   [SUGESTAO] Remova estas impressoras manualmente e tente novamente" -ForegroundColor Yellow
-            }
-            
-            return $false
-        }
+        Write-Host "   [ERRO] $($_.Exception.Message)" -ForegroundColor Red
+        return $false
     }
     
     Write-Host "`n========================================" -ForegroundColor Green
