@@ -218,7 +218,7 @@ function Remove-ImpressorasEDrivers {
     $totalDrivers = $drivers.Count
     
     Write-Host "`n========================================" -ForegroundColor Yellow
-    Write-Host "⚠️  ATENCAO! ESSA OPERACAO VAI REMOVER:" -ForegroundColor Yellow
+    Write-Host "ATENCAO! ESSA OPERACAO VAI REMOVER:" -ForegroundColor Yellow
     Write-Host "   - $totalImpressoras IMPRESSORA(S)" -ForegroundColor Yellow
     Write-Host "   - $totalDrivers DRIVER(S)" -ForegroundColor Yellow
     Write-Host "========================================`n" -ForegroundColor Yellow
@@ -240,10 +240,10 @@ function Remove-ImpressorasEDrivers {
     foreach ($impressora in $impressoras) {
         try {
             Remove-Printer -Name $impressora.Name -Confirm:$false -ErrorAction Stop
-            Write-Host "  ✓ $($impressora.Name)" -ForegroundColor Green
+            Write-Host "  OK $($impressora.Name)" -ForegroundColor Green
         }
         catch {
-            Write-Host "  ✗ Falha ao remover: $($impressora.Name)" -ForegroundColor Red
+            Write-Host "  ERRO Falha ao remover: $($impressora.Name)" -ForegroundColor Red
         }
     }
     
@@ -289,7 +289,7 @@ function Invoke-RemoverPorModelo {
     # Lista modelos
     foreach ($modelo in $modelosCSV) {
         $temScan = if ($modelo.TemScan -eq "S") { "(Print + Scan)" } else { "(Apenas Print)" }
-        Write-Host "  $($modelo.ID)) $($modelo.Modelo) $temScan" -ForegroundColor White
+        Write-Host "  $($modelo.ID) - $($modelo.Modelo) $temScan" -ForegroundColor White
     }
     
     Write-Host ""
@@ -329,29 +329,29 @@ function Invoke-RemoverPorModelo {
     Write-Host "  DRIVERS ENCONTRADOS NO SISTEMA" -ForegroundColor Cyan
     Write-Host "========================================`n" -ForegroundColor Cyan
     
-    Write-Host "📋 DRIVERS CADASTRADOS (CSV):" -ForegroundColor Green
+    Write-Host "DRIVERS CADASTRADOS (CSV):" -ForegroundColor Green
     foreach ($driver in $driversModelo) {
         $qtd = ($impressorasEncontradas | Where-Object { $_.DriverName -eq $driver }).Count
-        Write-Host "  ✓ $driver" -ForegroundColor White
-        Write-Host "    - Impressoras: $qtd" -ForegroundColor Gray
+        Write-Host "  - $driver" -ForegroundColor White
+        Write-Host "    Impressoras: $qtd" -ForegroundColor Gray
         
         if ($qtd -gt 0) {
             $imps = $impressorasEncontradas | Where-Object { $_.DriverName -eq $driver }
             foreach ($imp in $imps) {
-                Write-Host "      • $($imp.Name) ($($imp.PortName))" -ForegroundColor Gray
+                Write-Host "      * $($imp.Name) ($($imp.PortName))" -ForegroundColor Gray
             }
         }
     }
     
     if ($orfaos.Count -gt 0) {
-        Write-Host "`n⚠️  DRIVERS ORFAOS (nao estao no CSV):" -ForegroundColor Yellow
+        Write-Host "`nDRIVERS ORFAOS (nao estao no CSV):" -ForegroundColor Yellow
         foreach ($orfao in $orfaos) {
-            Write-Host "  • $($orfao.Nome)" -ForegroundColor White
-            Write-Host "    - Impressoras: $($orfao.Quantidade)" -ForegroundColor Gray
+            Write-Host "  - $($orfao.Nome)" -ForegroundColor White
+            Write-Host "    Impressoras: $($orfao.Quantidade)" -ForegroundColor Gray
             
             if ($orfao.Quantidade -gt 0) {
                 foreach ($imp in $orfao.Impressoras) {
-                    Write-Host "      • $($imp.Name) ($($imp.PortName))" -ForegroundColor Gray
+                    Write-Host "      * $($imp.Name) ($($imp.PortName))" -ForegroundColor Gray
                 }
             }
         }
@@ -429,7 +429,7 @@ function Invoke-RemoverEspecifica {
     $mapa = @{}
     
     foreach ($imp in $todasImpressoras) {
-        Write-Host "  $indice) $($imp.Name) - Driver: $($imp.DriverName)" -ForegroundColor White
+        Write-Host "  $indice - $($imp.Name) - Driver: $($imp.DriverName)" -ForegroundColor White
         Write-Host "     IP/Porta: $($imp.PortName)" -ForegroundColor Gray
         $mapa[$indice.ToString()] = $imp
         $indice++
@@ -463,12 +463,12 @@ function Invoke-RemoverEspecifica {
     
     if ($outrasImpressoras.Count -gt 0) {
         Write-Host "`n========================================" -ForegroundColor Yellow
-        Write-Host "⚠️  ATENCAO!" -ForegroundColor Yellow
+        Write-Host "ATENCAO!" -ForegroundColor Yellow
         Write-Host "========================================" -ForegroundColor Yellow
         Write-Host "Outras impressoras usam o mesmo driver:" -ForegroundColor Yellow
         
         foreach ($outra in $outrasImpressoras) {
-            Write-Host "  • $($outra.Name) ($($outra.PortName))" -ForegroundColor White
+            Write-Host "  - $($outra.Name) ($($outra.PortName))" -ForegroundColor White
         }
         
         Write-Host "`nREMOVER ESSA IMPRESSORA VAI APAGAR O DRIVER" -ForegroundColor Yellow
