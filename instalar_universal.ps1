@@ -199,7 +199,8 @@ function Test-RedeImpressora {
     param([Parameter(Mandatory=$true)][string]$enderecoIP)
     $meuIP = Get-MeuIPv4
     if (-not $meuIP) { return $true }
-    $pingOk = Test-Connection -ComputerName $enderecoIP -Count 1 -TimeoutSeconds $Global:Config.TempoPing -Quiet -ErrorAction SilentlyContinue
+    $pingOk = $timeoutMs = $Global:Config.TempoPing * 1000
+    $pingOk = Test-Connection -ComputerName $enderecoIP -Count 1 -Quiet -Timeout $timeoutMs -ErrorAction SilentlyContinue
     if ($pingOk) { return $true }
     $minhaRede = ($meuIP -split '\.')[0..2] -join '.'
     $redeImpressora = ($enderecoIP -split '\.')[0..2] -join '.'
