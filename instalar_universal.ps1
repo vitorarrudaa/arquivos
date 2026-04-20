@@ -25,6 +25,7 @@ $Global:Config = @{
     TempoEspera   = 10
     TempoPing     = 2
     LarguraUI     = 48
+    ManterExtracaoDebug = $true
 }
 
 $Global:TipoDriver = if ($modelo -match "M4080|CLX[ -]?6260") { "UPD" } else { "SPL" }
@@ -414,51 +415,63 @@ function Install-DriverUPD {
     $nomeArquivo = "driver_UPD_" + ($nomeModelo -replace '\s+', '_') + ".exe"
     $arquivoDriver = Get-ArquivoLocal -url $urlDriver -nomeDestino $nomeArquivo
     if (-not $arquivoDriver) { return $false }
-    $pastaExtracao = Join-Path $Global:Config.CaminhoTemp (("UPD_Extract_") + [guid]::NewGuid().ToString().Substring(0,8))
+    $nomePastaExtracao = "driver_UPD_" + ($nomeModelo -replace '\s+', '_')
+    $pastaExtracao = Join-Path $Global:Config.CaminhoTemp $nomePastaExtracao
+    if (Test-Path $pastaExtracao) {
+        Remove-Item $pastaExtracao -Recurse -Force -ErrorAction SilentlyContinue
+    }
     New-Item -Path $pastaExtracao -ItemType Directory -Force | Out-Null
     $controle7Zip = Ensure-7Zip
     $caminho7Zip = $controle7Zip.Caminho
     $instaladoPeloScript = $controle7Zip.InstaladoPeloScript
-    if ($caminho7Zip) {
-        Write-Host "Extraindo pacote de drivers com 7-Zip..." -ForegroundColor Gray
-        & $caminho7Zip x "$arquivoDriver" "-o$pastaExtracao" -y | Out-Null
+    if (-not $caminho7Zip) {
+        Write-Mensagem "7-Zip nao foi encontrado ou instalado." "Erro"
+        return $false
     }
-    else {
-        Write-Mensagem "7-Zip nao foi encontrado ou instalado. Usando metodo padrao." "Aviso"
-        Start-Process $arquivoDriver -ArgumentList "/S" -Wait -NoNewWindow
-        Start-Sleep -Seconds $Global:Config.TempoEspera
+    Write-Host "Extraindo pacote de drivers com 7-Zip..." -ForegroundColor Gray
+    & $caminho7Zip x "$arquivoDriver" "-o$pastaExtracao" -y | Out-Null
+    Start-Sleep -Seconds 2
+    $itensExtraidos = Get-ChildItem -Path $pastaExtracao -Recurse -ErrorAction SilentlyContinue
+    if (-not $itensExtraidos -or $itensExtraidos.Count -eq 0) {
+        Write-Mensagem "Falha na extracao do pacote UPD. Pasta de extracao vazia." "Erro"
+        return $false
     }
-    $driverEspecifico = $null
-    if ($caminho7Zip) {
-        $arquivosInf = Get-ChildItem -Path $pastaExtracao -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue |
-                       Where-Object { $_.Name -notlike "*autorun*" -and $_.Name -notlike "*setup*" }
-        $infEspecifico = $arquivosInf | Where-Object {
-            $_.FullName -match [regex]::Escape(($filtroDriver -replace 'Samsung ', '')) -or $_.FullName -match "M408|6260|UPD"
-        } | Select-Object -First 1
-        if (-not $infEspecifico) { $infEspecifico = $arquivosInf | Select-Object -First 1 }
-        if ($infEspecifico) {
-            Write-Host "Instalando driver via pnputil..." -ForegroundColor Gray
-            & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1 | Out-Null
-            Start-Sleep -Seconds $Global:Config.TempoEspera
-            $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
-                               Where-Object {
-                                   $_.Name -like "*$filtroDriver*" -and $_.Name -notlike "*PCL*" -and $_.Name -notlike "* PS" -and $_.Name -notlike "*Universal Print Driver*"
-                               } | Select-Object -First 1
-        }
-        else {
-            Write-Mensagem "Nenhum arquivo INF valido foi encontrado. Usando instalacao padrao." "Aviso"
-            Start-Process $arquivoDriver -ArgumentList "/S" -Wait -NoNewWindow
-            Start-Sleep -Seconds $Global:Config.TempoEspera
-        }
+    Write-Host "Procurando arquivo INF do modelo..." -ForegroundColor Gray
+    $arquivosInf = Get-ChildItem -Path $pastaExtracao -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue |
+                   Where-Object { $_.Name -notlike "*autorun*" -and $_.Name -notlike "*setup*" }
+    if (-not $arquivosInf) {
+        Write-Mensagem "Nenhum arquivo INF foi encontrado na extracao." "Erro"
+        return $false
     }
-    Remove-Item $pastaExtracao -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
+    $infEspecifico = $null
+    foreach ($inf in $arquivosInf) {
+        try {
+            $conteudo = Get-Content -Path $inf.FullName -ErrorAction SilentlyContinue
+            if ($conteudo -match [regex]::Escape($filtroDriver)) {
+                $infEspecifico = $inf
+                break
+            }
+        } catch { }
+    }
+    if (-not $infEspecifico) {
+        $infEspecifico = $arquivosInf | Where-Object { $_.Name -ieq "us016.inf" } | Select-Object -First 1
+    }
+    if (-not $infEspecifico) {
+        Write-Mensagem "INF especifico do modelo nao foi encontrado na extracao." "Erro"
+        return $false
+    }
+    Write-Host "INF localizado: $($infEspecifico.FullName)" -ForegroundColor Gray
+    Write-Host "Instalando driver via pnputil..." -ForegroundColor Gray
+    & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1 | Out-Null
+    Start-Sleep -Seconds $Global:Config.TempoEspera
+    $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
+                       Where-Object { $_.Name -eq $filtroDriver -or $_.Name -like "*$filtroDriver*" } |
+                       Where-Object { $_.Name -notlike "*PCL*" -and $_.Name -notlike "* PS" -and $_.Name -notlike "*Universal Print Driver*" } |
+                       Select-Object -First 1
     if (-not $driverEspecifico) {
-        $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
-                           Where-Object {
-                               $_.Name -like "*$filtroDriver*" -and $_.Name -notlike "*PCL*" -and $_.Name -notlike "* PS" -and $_.Name -notlike "*Universal Print Driver*"
-                           } | Select-Object -First 1
+        Write-Mensagem "Driver especifico nao foi registrado apos o pnputil." "Aviso"
     }
+    Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
     $driverPreferencial = if ($driverEspecifico) { $driverEspecifico.Name } else { "" }
     $sucesso = Set-FilaImpressora -nomeImpressora $nomeImpressora -enderecoIP $enderecoIP -filtroDriver $filtroDriver -driverPreferencial $driverPreferencial -aceitaUniversal $true
     if ($sucesso) {
