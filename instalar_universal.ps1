@@ -128,54 +128,57 @@ function Format-TamanhoArquivo {
 
 function Get-ArquivoLocal {
     param([string]$url, [string]$nomeDestino)
+
     $caminhoCompleto = Join-Path $Global:Config.CaminhoTemp $nomeDestino
+    $arquivoTemp = $caminhoCompleto + ".tmp"
+
     if (Test-Path $caminhoCompleto) {
         Write-Mensagem "Reutilizando arquivo local: $nomeDestino" "Info"
         return $caminhoCompleto
     }
+
     try {
-        $tamanhoTotal = Get-TamanhoArquivoRemoto -url $url
+        $tamanhoRemoto = Get-TamanhoArquivoRemoto -url $url
+        $tamanhoFormatado = if ($tamanhoRemoto -gt 0) { Format-TamanhoArquivo -bytes $tamanhoRemoto } else { "tamanho desconhecido" }
+
+        Write-Host "Baixando arquivo... ($tamanhoFormatado)" -ForegroundColor Gray
+
+        if (Test-Path $arquivoTemp) {
+            Remove-Item $arquivoTemp -Force -ErrorAction SilentlyContinue
+        }
+
         $wc = New-Object System.Net.WebClient
-        $downloadConcluido = $false
-        $erroDownload = $null
-        Write-Host "Baixando: $nomeDestino" -ForegroundColor Gray
-        $eventoProgresso = Register-ObjectEvent -InputObject $wc -EventName DownloadProgressChanged -Action {
-            $script:percentualAtual = $Event.SourceEventArgs.ProgressPercentage
-            $script:bytesRecebidos = $Event.SourceEventArgs.BytesReceived
-            $script:bytesTotais = $Event.SourceEventArgs.TotalBytesToReceive
-        }
-        $eventoFim = Register-ObjectEvent -InputObject $wc -EventName DownloadFileCompleted -Action {
-            $script:downloadConcluido = $true
-            $script:erroDownload = $Event.SourceEventArgs.Error
-        }
-        $script:percentualAtual = 0
-        $script:bytesRecebidos = 0
-        $script:bytesTotais = $tamanhoTotal
-        $script:downloadConcluido = $false
-        $script:erroDownload = $null
-        $wc.DownloadFileAsync($url, $caminhoCompleto)
-        while (-not $script:downloadConcluido) {
-            $larguraBarra = 24
-            $percentual = [math]::Max(0, [math]::Min(100, $script:percentualAtual))
-            $preenchido = [math]::Floor(($percentual / 100) * $larguraBarra)
-            $barra = ("=" * $preenchido).PadRight($larguraBarra, ' ')
-            $recebidoFormatado = Format-TamanhoArquivo -bytes $script:bytesRecebidos
-            $totalFormatado = if ($script:bytesTotais -gt 0) { Format-TamanhoArquivo -bytes $script:bytesTotais } else { "?" }
-            Write-Host (("`r[{0}] {1,3}% ({2} / {3})") -f $barra, $percentual, $recebidoFormatado, $totalFormatado) -NoNewline -ForegroundColor Cyan
-            Start-Sleep -Milliseconds 250
-        }
-        Write-Host ""
-        Unregister-Event -SourceIdentifier $eventoProgresso.Name -ErrorAction SilentlyContinue
-        Unregister-Event -SourceIdentifier $eventoFim.Name -ErrorAction SilentlyContinue
-        Remove-Job -Id $eventoProgresso.Id -Force -ErrorAction SilentlyContinue
-        Remove-Job -Id $eventoFim.Id -Force -ErrorAction SilentlyContinue
+        $wc.DownloadFile($url, $arquivoTemp)
         $wc.Dispose()
-        if ($script:erroDownload) { throw $script:erroDownload }
-        Write-Mensagem "Download concluido!" "Sucesso"
+
+        if (-not (Test-Path $arquivoTemp)) {
+            throw "Arquivo temporario nao foi encontrado apos o download"
+        }
+
+        $arquivoInfo = Get-Item $arquivoTemp -ErrorAction Stop
+        $tamanhoLocal = $arquivoInfo.Length
+
+        if ($tamanhoLocal -le 0) {
+            throw "Arquivo baixado com tamanho zero"
+        }
+
+        if ($tamanhoRemoto -gt 0) {
+            $diferenca = [math]::Abs($tamanhoRemoto - $tamanhoLocal)
+            $tolerancia = [math]::Max([math]::Floor($tamanhoRemoto * 0.02), 1MB)
+            if ($diferenca -gt $tolerancia) {
+                throw "Tamanho do arquivo diferente do esperado. Remoto: $(Format-TamanhoArquivo -bytes $tamanhoRemoto) | Local: $(Format-TamanhoArquivo -bytes $tamanhoLocal)"
+            }
+        }
+
+        Move-Item $arquivoTemp $caminhoCompleto -Force
+        Write-Mensagem "Download concluido" "Sucesso"
         return $caminhoCompleto
     }
     catch {
-        Write-Mensagem "Falha ao baixar arquivo: $($_.Exception.Message)" "Erro"
+        if (Test-Path $arquivoTemp) {
+            Remove-Item $arquivoTemp -Force -ErrorAction SilentlyContinue
+        }
+        Write-Mensagem "Erro no download: $($_.Exception.Message)" "Erro"
         Read-Host "Pressione ENTER para continuar"
         return $null
     }
