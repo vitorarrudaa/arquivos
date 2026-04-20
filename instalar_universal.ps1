@@ -200,7 +200,8 @@ function Test-RedeImpressora {
     $meuIP = Get-MeuIPv4
     if (-not $meuIP) { return $true }
     $pingOk = $timeoutMs = $Global:Config.TempoPing * 1000
-    $pingOk = Test-Connection -ComputerName $enderecoIP -Count 1 -Quiet -Timeout $timeoutMs -ErrorAction SilentlyContinue
+    $pingOk = Test-Connection -ComputerName $enderecoIP -Count 1 -Quiet -Timeout 
+    $timeoutMs -ErrorAction SilentlyContinue
     if ($pingOk) { return $true }
     $minhaRede = ($meuIP -split '\.')[0..2] -join '.'
     $redeImpressora = ($enderecoIP -split '\.')[0..2] -join '.'
