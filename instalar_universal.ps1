@@ -467,32 +467,32 @@ function Install-DriverUPD {
     Write-Host "Instalando driver via pnputil..." -ForegroundColor Gray
     & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1 | Out-Null
     Start-Sleep -Seconds $Global:Config.TempoEspera
-    $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
+        $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
                        Where-Object {
                            $_.Name -eq $filtroDriver -or
-                           $_.Name -like "*$filtroDriver*" -or
-                           $_.Name -like "*M408x*"
+                           $_.Name -like "*$filtroDriver*"
                        } |
                        Select-Object -First 1
 
     if (-not $driverEspecifico) {
         try {
-            rundll32 printui.dll,PrintUIEntry /ia /m "$filtroDriver" /h "x64" /v "Type 3 - User Mode" /f "$($infEspecifico.FullName)" | Out-Null
+            & rundll32.exe printui.dll,PrintUIEntry /ia /m "$filtroDriver" /f "$($infEspecifico.FullName)" /h "x64" /v "Type 3 - User Mode" | Out-Null
             Start-Sleep -Seconds 3
 
             $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
                                Where-Object {
                                    $_.Name -eq $filtroDriver -or
-                                   $_.Name -like "*$filtroDriver*" -or
-                                   $_.Name -like "*M408x*"
+                                   $_.Name -like "*$filtroDriver*"
                                } |
                                Select-Object -First 1
         }
-        catch { }
+        catch {
+        }
     }
 
     if (-not $driverEspecifico) {
-        Write-Mensagem "Driver especifico nao foi registrado apos o pnputil/PrintUI." "Aviso"
+        Write-Mensagem "Driver especifico nao foi registrado." "Erro"
+        return $false
     }
     Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
     $driverPreferencial = if ($driverEspecifico) { $driverEspecifico.Name } else { "" }
