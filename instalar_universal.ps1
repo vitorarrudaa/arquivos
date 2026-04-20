@@ -467,7 +467,7 @@ function Install-DriverUPD {
     Write-Host "Instalando driver via pnputil..." -ForegroundColor Gray
     & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1 | Out-Null
     Start-Sleep -Seconds $Global:Config.TempoEspera
-        $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
+    $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
                        Where-Object {
                            $_.Name -eq $filtroDriver -or
                            $_.Name -like "*$filtroDriver*"
@@ -476,7 +476,7 @@ function Install-DriverUPD {
 
     if (-not $driverEspecifico) {
         try {
-            & rundll32.exe printui.dll,PrintUIEntry /ia /m "$filtroDriver" /f "$($infEspecifico.FullName)" /h "x64" /v "Type 3 - User Mode" | Out-Null
+            & rundll32.exe printui.dll,PrintUIEntry /ia /m "$filtroDriver" /f "$($infEspecifico.FullName)" | Out-Null
             Start-Sleep -Seconds 3
 
             $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
