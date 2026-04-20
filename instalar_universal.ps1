@@ -468,11 +468,31 @@ function Install-DriverUPD {
     & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1 | Out-Null
     Start-Sleep -Seconds $Global:Config.TempoEspera
     $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
-                       Where-Object { $_.Name -eq $filtroDriver -or $_.Name -like "*$filtroDriver*" } |
-                       Where-Object { $_.Name -notlike "*PCL*" -and $_.Name -notlike "* PS" -and $_.Name -notlike "*Universal Print Driver*" } |
+                       Where-Object {
+                           $_.Name -eq $filtroDriver -or
+                           $_.Name -like "*$filtroDriver*" -or
+                           $_.Name -like "*M408x*"
+                       } |
                        Select-Object -First 1
+
     if (-not $driverEspecifico) {
-        Write-Mensagem "Driver especifico nao foi registrado apos o pnputil." "Aviso"
+        try {
+            rundll32 printui.dll,PrintUIEntry /ia /m "$filtroDriver" /h "x64" /v "Type 3 - User Mode" /f "$($infEspecifico.FullName)" | Out-Null
+            Start-Sleep -Seconds 3
+
+            $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
+                               Where-Object {
+                                   $_.Name -eq $filtroDriver -or
+                                   $_.Name -like "*$filtroDriver*" -or
+                                   $_.Name -like "*M408x*"
+                               } |
+                               Select-Object -First 1
+        }
+        catch { }
+    }
+
+    if (-not $driverEspecifico) {
+        Write-Mensagem "Driver especifico nao foi registrado apos o pnputil/PrintUI." "Aviso"
     }
     Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
     $driverPreferencial = if ($driverEspecifico) { $driverEspecifico.Name } else { "" }
