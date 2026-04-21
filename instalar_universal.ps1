@@ -439,26 +439,145 @@ function Install-DriverUPD {
     if (Test-Path $pastaExtracao) {
         Remove-Item $pastaExtracao -Recurse -Force -ErrorAction SilentlyContinue
     }
-    New-Item -Path $pastaExtracao -ItemType Directory -Force 
+    New-Item -Path $pastaExtracao -ItemType Directory -Force | Out-Null
 
-function Remove-ImpressoraExistente {
-    param([Parameter(Mandatory=$true)][ValidateSet("Nome","IP")][string]$tipoBusca,[Parameter(Mandatory=$true)][string]$valor)
-    try {
-        if ($tipoBusca -eq "Nome") { $impressora = Get-Printer -Name $valor -ErrorAction Stop }
-        else { $impressora = Get-Printer -ErrorAction Stop | Where-Object { $_.PortName -eq $valor } | Select-Object -First 1 }
-        if ($impressora) {
-            Write-Host "Removendo impressora: $($impressora.Name)..." -ForegroundColor Gray
-            Remove-Printer -Name $impressora.Name -Confirm:$false -ErrorAction Stop
-            Write-Mensagem "Impressora removida com sucesso!" "Sucesso"
-            Start-Sleep -Seconds 1
-            return $true
+    Write-Mensagem "ETAPA 4/8 - Verificando 7-Zip..." "Info"
+    $controle7Zip = Ensure-7Zip
+    $caminho7Zip = $controle7Zip.Caminho
+    $instaladoPeloScript = $controle7Zip.InstaladoPeloScript
+    if (-not $caminho7Zip) {
+        Write-Mensagem "7-Zip nao foi encontrado ou instalado." "Erro"
+        return $false
+    }
+
+    Write-Mensagem "ETAPA 5/8 - Extraindo pacote UPD..." "Info"
+    & $caminho7Zip x "$arquivoDriver" "-o$pastaExtracao" -y | Out-Null
+    Start-Sleep -Seconds 2
+
+    $itensExtraidos = Get-ChildItem -Path $pastaExtracao -Recurse -ErrorAction SilentlyContinue
+    if (-not $itensExtraidos -or $itensExtraidos.Count -eq 0) {
+        Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
+        Write-Mensagem "Falha na extracao do pacote UPD. Pasta de extracao vazia." "Erro"
+        return $false
+    }
+    Write-Mensagem "Extracao concluida com $($itensExtraidos.Count) itens." "Sucesso"
+
+    Write-Mensagem "ETAPA 6/8 - Localizando INF compatível com o filtro '$filtroDriver'..." "Info"
+    $arquivosInf = Get-ChildItem -Path $pastaExtracao -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue |
+                   Where-Object { $_.Name -notlike "*autorun*" -and $_.Name -notlike "*setup*" }
+
+    if (-not $arquivosInf) {
+        Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
+        Write-Mensagem "Nenhum arquivo INF foi encontrado na extracao." "Erro"
+        return $false
+    }
+
+    Write-Mensagem "INF encontrados: $($arquivosInf.Count)" "Info"
+
+    $infCompativeis = foreach ($inf in $arquivosInf) {
+        try {
+            $conteudo = Get-Content -Path $inf.FullName -Raw -ErrorAction SilentlyContinue
+            if ($conteudo -match [regex]::Escape($filtroDriver)) {
+                [pscustomobject]@{
+                    Arquivo = $inf
+                    Caminho = $inf.FullName
+                    PCL = ($inf.FullName -match '(?i)(\\|/|_|-)PCL(\\|/|_|-|$)' -or $inf.DirectoryName -match '(?i)\\PCL($|\\)')
+                    PS  = ($inf.FullName -match '(?i)(\\|/|_|-)PS(\\|/|_|-|$)' -or $inf.DirectoryName -match '(?i)\\PS($|\\)')
+                }
+            }
         }
+        catch { }
+    }
+
+    if (-not $infCompativeis) {
+        Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
+        Write-Mensagem "Nenhum INF continha o filtro '$filtroDriver'." "Erro"
         return $false
     }
-    catch {
-        Write-Mensagem "Erro ao remover impressora: $($_.Exception.Message)" "Erro"
+
+    Write-Mensagem "INFs compativeis encontrados: $($infCompativeis.Count)" "Sucesso"
+    $infEscolhido = $infCompativeis |
+        Sort-Object @{Expression = {
+            if ($_.PCL) { 0 }
+            elseif (-not $_.PS) { 1 }
+            else { 2 }
+        }} |
+        Select-Object -First 1
+
+    if (-not $infEscolhido) {
+        Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
+        Write-Mensagem "Nao foi possivel escolher um INF valido." "Erro"
         return $false
     }
+
+    $infEspecifico = $infEscolhido.Arquivo
+    Write-Mensagem "INF escolhido: $($infEspecifico.FullName)" "Sucesso"
+    if ($infEscolhido.PCL) {
+        Write-Mensagem "Prioridade aplicada: PCL" "Info"
+    }
+    elseif ($infEscolhido.PS) {
+        Write-Mensagem "Prioridade aplicada: PS" "Aviso"
+    }
+    else {
+        Write-Mensagem "Prioridade aplicada: INF neutro" "Info"
+    }
+
+    Write-Mensagem "ETAPA 7/8 - Adicionando pacote ao Driver Store com pnputil..." "Info"
+    $saidaPnputil = & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1
+    $codigoPnputil = $LASTEXITCODE
+    if ($saidaPnputil) {
+        Write-Host ($saidaPnputil | Out-String) -ForegroundColor DarkGray
+    }
+    Write-Mensagem "Codigo de saida do pnputil: $codigoPnputil" "Info"
+
+    Start-Sleep -Seconds $Global:Config.TempoEspera
+
+    $driverNoStore = pnputil.exe /enum-drivers 2>&1 | Select-String -Pattern [regex]::Escape($filtroDriver)
+    if ($driverNoStore) {
+        Write-Mensagem "Filtro encontrado no driver store." "Sucesso"
+    }
+    else {
+        Write-Mensagem "Filtro ainda nao apareceu no driver store." "Aviso"
+    }
+
+    Write-Mensagem "ETAPA 8/8 - Verificando registracao com Get-PrinterDriver..." "Info"
+    $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Name -eq $filtroDriver } |
+                        Select-Object -First 1
+
+    if ($driverEspecifico) {
+        Write-Mensagem "Driver localizado: $($driverEspecifico.Name)" "Sucesso"
+    }
+    else {
+        Write-Mensagem "Driver nao localizado por correspondencia exata." "Aviso"
+        $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
+                            Where-Object { $_.Name -like "*$filtroDriver*" } |
+                            Select-Object -First 1
+
+        if ($driverEspecifico) {
+            Write-Mensagem "Driver localizado por correspondencia parcial: $($driverEspecifico.Name)" "Sucesso"
+        }
+        else {
+            Write-Mensagem "Driver especifico nao foi localizado apos pnputil." "Erro"
+            Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
+            return $false
+        }
+    }
+
+    Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
+
+    $driverPreferencial = $driverEspecifico.Name
+    Write-Mensagem "Iniciando configuracao da fila com driver '$driverPreferencial'..." "Info"
+    $sucesso = Set-FilaImpressora -nomeImpressora $nomeImpressora -enderecoIP $enderecoIP -filtroDriver $filtroDriver -driverPreferencial $driverPreferencial -aceitaUniversal $true
+
+    if ($sucesso) {
+        Write-Mensagem "Impressora configurada com driver especifico!" "Sucesso"
+    }
+    else {
+        Write-Mensagem "Falha na configuracao final da fila." "Erro"
+    }
+
+    return $sucesso
 }
 
 function Remove-FilaDuplicada {
