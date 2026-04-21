@@ -406,7 +406,14 @@ function Install-DriverSPL {
 }
 
 function Install-DriverUPD {
-    param([string]$urlDriver,[string]$nomeModelo,[string]$filtroDriver,[string]$nomeImpressora,[string]$enderecoIP)
+    param(
+        [string]$urlDriver,
+        [string]$nomeModelo,
+        [string]$filtroDriver,
+        [string]$nomeImpressora,
+        [string]$enderecoIP
+    )
+
     $statusDriver = Test-DriverExistente -filtroDriver $filtroDriver
     if ($statusDriver.Encontrado -and $statusDriver.Tipo -eq "Nativo") {
         Write-Host ""
@@ -414,93 +421,117 @@ function Install-DriverUPD {
         Write-Host "Configurando impressora..." -ForegroundColor Gray
         return (Set-FilaImpressora -nomeImpressora $nomeImpressora -enderecoIP $enderecoIP -filtroDriver $filtroDriver -driverPreferencial $statusDriver.Driver -aceitaUniversal $true)
     }
+
     Write-Host ""
     $nomeArquivo = "driver_UPD_" + ($nomeModelo -replace '\s+', '_') + ".exe"
     $arquivoDriver = Get-ArquivoLocal -url $urlDriver -nomeDestino $nomeArquivo
     if (-not $arquivoDriver) { return $false }
+
     $nomePastaExtracao = "driver_UPD_" + ($nomeModelo -replace '\s+', '_')
     $pastaExtracao = Join-Path $Global:Config.CaminhoTemp $nomePastaExtracao
+
     if (Test-Path $pastaExtracao) {
         Remove-Item $pastaExtracao -Recurse -Force -ErrorAction SilentlyContinue
     }
+
     New-Item -Path $pastaExtracao -ItemType Directory -Force | Out-Null
+
     $controle7Zip = Ensure-7Zip
     $caminho7Zip = $controle7Zip.Caminho
     $instaladoPeloScript = $controle7Zip.InstaladoPeloScript
+
     if (-not $caminho7Zip) {
         Write-Mensagem "7-Zip nao foi encontrado ou instalado." "Erro"
         return $false
     }
+
     Write-Host "Extraindo pacote de drivers com 7-Zip..." -ForegroundColor Gray
     & $caminho7Zip x "$arquivoDriver" "-o$pastaExtracao" -y | Out-Null
     Start-Sleep -Seconds 2
+
     $itensExtraidos = Get-ChildItem -Path $pastaExtracao -Recurse -ErrorAction SilentlyContinue
     if (-not $itensExtraidos -or $itensExtraidos.Count -eq 0) {
         Write-Mensagem "Falha na extracao do pacote UPD. Pasta de extracao vazia." "Erro"
         return $false
     }
+
     Write-Host "Procurando arquivo INF do modelo..." -ForegroundColor Gray
     $arquivosInf = Get-ChildItem -Path $pastaExtracao -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue |
                    Where-Object { $_.Name -notlike "*autorun*" -and $_.Name -notlike "*setup*" }
+
     if (-not $arquivosInf) {
         Write-Mensagem "Nenhum arquivo INF foi encontrado na extracao." "Erro"
         return $false
     }
-    $infEspecifico = $null
-    foreach ($inf in $arquivosInf) {
+
+    $infCompativeis = foreach ($inf in $arquivosInf) {
         try {
-            $conteudo = Get-Content -Path $inf.FullName -ErrorAction SilentlyContinue
+            $conteudo = Get-Content -Path $inf.FullName -ErrorAction SilentlyContinue -Raw
             if ($conteudo -match [regex]::Escape($filtroDriver)) {
-                $infEspecifico = $inf
-                break
+                [pscustomobject]@{
+                    Arquivo = $inf
+                    Conteudo = $conteudo
+                    PCL = ($inf.FullName -match '(?i)\\PCL\\|PCL')
+                    PS  = ($inf.FullName -match '(?i)\\PS\\|PS')
+                }
             }
-        } catch { }
+        }
+        catch { }
     }
-    if (-not $infEspecifico) {
-        $infEspecifico = $arquivosInf | Where-Object { $_.Name -ieq "us016.inf" } | Select-Object -First 1
+
+    if (-not $infCompativeis) {
+        Write-Mensagem "INF especifico do modelo nao foi encontrado na extracao." "Erro"
+        return $false
     }
+
+    $infEspecifico = $infCompativeis |
+        Sort-Object @{Expression={ if ($_.PCL) { 0 } elseif (-not $_.PS) { 1 } else { 2 } }} |
+        Select-Object -First 1
+
     if (-not $infEspecifico) {
         Write-Mensagem "INF especifico do modelo nao foi encontrado na extracao." "Erro"
         return $false
     }
+
+    $infEspecifico = $infEspecifico.Arquivo
     Write-Host "INF localizado: $($infEspecifico.FullName)" -ForegroundColor Gray
     Write-Host "Instalando driver via pnputil..." -ForegroundColor Gray
+
     & pnputil.exe /add-driver "$($infEspecifico.FullName)" /install 2>&1 | Out-Null
     Start-Sleep -Seconds $Global:Config.TempoEspera
+
     $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
-                       Where-Object {
-                           $_.Name -eq $filtroDriver -or
-                           $_.Name -like "*$filtroDriver*"
-                       } |
-                       Select-Object -First 1
+                        Where-Object {
+                            $_.Name -eq $filtroDriver -or
+                            $_.Name -like "*$filtroDriver*"
+                        } |
+                        Select-Object -First 1
 
     if (-not $driverEspecifico) {
-        try {
-            & rundll32.exe printui.dll,PrintUIEntry /ia /m "$filtroDriver" /f "$($infEspecifico.FullName)" | Out-Null
-            Start-Sleep -Seconds 3
-
-            $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
-                               Where-Object {
-                                   $_.Name -eq $filtroDriver -or
-                                   $_.Name -like "*$filtroDriver*"
-                               } |
-                               Select-Object -First 1
-        }
-        catch {
-        }
+        Start-Sleep -Seconds 3
+        $driverEspecifico = Get-PrinterDriver -ErrorAction SilentlyContinue |
+                            Where-Object {
+                                $_.Name -eq $filtroDriver -or
+                                $_.Name -like "*$filtroDriver*"
+                            } |
+                            Select-Object -First 1
     }
 
     if (-not $driverEspecifico) {
-        Write-Mensagem "Driver especifico nao foi registrado." "Erro"
+        Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
+        Write-Mensagem "Driver especifico nao foi localizado apos a instalacao do INF." "Erro"
         return $false
     }
+
     Remove-7ZipIfNeeded -instaladoPeloScript $instaladoPeloScript
-    $driverPreferencial = if ($driverEspecifico) { $driverEspecifico.Name } else { "" }
+
+    $driverPreferencial = $driverEspecifico.Name
     $sucesso = Set-FilaImpressora -nomeImpressora $nomeImpressora -enderecoIP $enderecoIP -filtroDriver $filtroDriver -driverPreferencial $driverPreferencial -aceitaUniversal $true
+
     if ($sucesso) {
-        if ($driverEspecifico) { Write-Mensagem "Impressora configurada com driver especifico!" "Sucesso" }
-        else { Write-Mensagem "Impressora configurada com driver universal" "Aviso" }
+        Write-Mensagem "Impressora configurada com driver especifico!" "Sucesso"
     }
+
     return $sucesso
 }
 
