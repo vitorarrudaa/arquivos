@@ -1,6 +1,6 @@
 # ================================================================================
 # SCRIPT: Menu Principal - Sistema de Instalacao de Impressoras
-# VERSAO: 3.0
+# VERSAO: 3.1
 # DESCRICAO: Menu interativo para instalacao de drivers de impressoras
 # ================================================================================
 
@@ -54,6 +54,7 @@ function Write-SeparadorFabricante {
     $prefixo = "-- $fabricante "
     $resto = "-" * ($LARGURA - $prefixo.Length)
     Write-Host "$prefixo$resto" -ForegroundColor Yellow
+    Write-Host ""
 }
 
 function Write-Cabecalho {
@@ -74,7 +75,7 @@ function Write-Cabecalho-Principal {
     Write-Host ""
     Write-Borda
     $espacos = [math]::Max(0, [math]::Floor(($LARGURA - $titulo.Length) / 2))
-    Write-Host (" " * $espacos + $titulo) -ForegroundColor Magenta
+    Write-Host (" " * $espacos + $titulo) -ForegroundColor White
     Write-Borda
     Write-Host ""
 }
@@ -142,7 +143,6 @@ function Show-ModelMenu {
     Clear-Host
     Write-Cabecalho-Principal "TECH3 - INSTALADOR DE IMPRESSORAS"
 
-    # Agrupar modelos por fabricante
     $fabricantes = $listaModelos | Select-Object -ExpandProperty Fabricante -Unique
 
     foreach ($fab in $fabricantes) {
@@ -219,7 +219,7 @@ function Invoke-Installation {
 
 Clear-Host
 Write-Borda
-Write-Host ("  TECH3 - INSTALADOR DE IMPRESSORAS") -ForegroundColor Magenta
+Write-Host ("  TECH3 - INSTALADOR DE IMPRESSORAS") -ForegroundColor White
 Write-Borda
 Write-Host ""
 
